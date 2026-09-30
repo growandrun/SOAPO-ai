@@ -45,64 +45,55 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
 
 ## 2. 실제 서비스로 올리기 (Vercel + Supabase)
 
-사이트는 **Vercel**이 GitHub 저장소와 연결되어 push할 때마다 자동으로 배포합니다 (`vercel.json`, `scripts/build.mjs`).
-DB 구조와 로그인 메일 설정은 GitHub Actions의 **Supabase 설정** 워크플로(`.github/workflows/supabase.yml`)가 적용합니다.
+| 단계 | 상태 |
+|---|---|
+| Supabase 프로젝트 `soapo supabase` (서울) | ✅ 만들어짐 |
+| DB 테이블·권한·실시간 메시지 (`supabase/migrations/`) | ✅ 적용됨, Supabase 보안 점검 반영 |
+| 앱이 쓸 연결값 (`supabase/production.json`) | ✅ 저장소에 들어 있음 (공개 키라 괜찮음) |
+| ① Vercel에 저장소 연결 | 할 일 |
+| ② 로그인 설정 (사이트 주소, 한국어 메일) | 할 일 |
+| ③ 환자에게 메일 보내기 (Resend) | 할 일 |
 
 ### ① Vercel에 저장소 연결 (3분)
 1. [vercel.com](https://vercel.com)에 GitHub 계정으로 로그인합니다.
 2. **Add New → Project → `growandrun/SOAPO-ai` Import**를 누릅니다.
-3. 설정은 건드리지 말고 **Deploy**를 누릅니다. 빌드 방법은 `vercel.json`에 들어 있습니다.
+3. 설정은 건드리지 말고 **Deploy**를 누릅니다.
 
-여기까지 하면 `https://<프로젝트이름>.vercel.app`이 열리고, `/demo/`에서 데모를 쓸 수 있습니다. Supabase를 연결하기 전에는 첫 화면이 설정 안내입니다.
+빌드가 `supabase/production.json`을 읽어 Supabase에 자동으로 연결하므로 환경 변수를 넣지 않아도 됩니다. (Vercel 환경 변수 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`가 있으면 그 값이 우선합니다.)
+배포가 끝나면 나오는 주소(예: `https://soapo-ai.vercel.app`)를 ②에서 씁니다.
 
-### ② Supabase 연결 (5분)
-**Vercel 안에서 만드는 방법 (추천)**
-1. Vercel 프로젝트 → **Storage → Create Database → Supabase**를 고릅니다. 리전은 서울(ap-northeast-2)에 가까운 곳을 고르세요.
-2. 연결하면 `SUPABASE_URL`, `SUPABASE_ANON_KEY` 같은 환경 변수가 Vercel에 자동으로 들어갑니다.
-3. **Deployments → 최신 배포 → Redeploy**를 누르면 앱이 Supabase에 연결됩니다.
+### ② 로그인 설정 (3분) — 둘 중 하나
 
-**Supabase에서 직접 만드는 방법**
-1. [supabase.com](https://supabase.com)에서 프로젝트를 만듭니다. 리전은 **Northeast Asia (Seoul)**.
-2. Vercel 프로젝트 → **Settings → Environment Variables**에 두 값을 넣고 Redeploy합니다.
-   - `SUPABASE_URL`: Project URL (`https://<ref>.supabase.co`)
-   - `SUPABASE_PUBLISHABLE_KEY`: Publishable key. **Secret key는 넣지 마세요.** 넣으면 빌드가 멈추도록 막아 두었습니다.
+**방법 A: Supabase 대시보드에서 직접**
+1. [Authentication → URL Configuration](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/url-configuration)
+   - **Site URL**: Vercel 주소 (예: `https://soapo-ai.vercel.app`)
+   - **Redirect URLs**: `https://soapo-ai.vercel.app/**` 추가
+2. [Authentication → Emails](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/templates)
+   - **Magic link**와 **Confirm signup** 두 곳 모두 제목을 `SOAPO 재활노트 로그인`으로 바꿉니다.
+   - 본문에는 `supabase/templates/magic_link.html` 내용을 붙여 넣습니다.
+   - 이 템플릿에 6자리 코드가 들어 있어야 다른 기기에서 메일을 연 환자도 로그인할 수 있습니다.
 
-### ③ DB 구조와 로그인 설정 적용 (3분)
-1. Supabase에서 세 가지를 준비합니다.
-   - [Access Token](https://supabase.com/dashboard/account/tokens)
-   - 프로젝트 ref: 대시보드 주소 `supabase.com/dashboard/project/<여기 20자리>`
-   - DB 비밀번호
-2. GitHub 저장소 **Settings → Secrets and variables → Actions**에 넣습니다.
+**방법 B: 자동 (GitHub Actions)**
+1. [Access Token](https://supabase.com/dashboard/account/tokens)을 만듭니다.
+2. GitHub 저장소 **Settings → Secrets and variables → Actions**에 아래 값을 넣습니다.
+   - Secret `SUPABASE_ACCESS_TOKEN`: 1번에서 만든 토큰
+   - Variable `SITE_URL`: Vercel 주소
+3. **Actions → Supabase 설정 → Run workflow**를 누르면 방법 A의 내용을 자동으로 적용합니다.
 
-| 종류 | 이름 | 값 |
-|---|---|---|
-| Secret | `SUPABASE_ACCESS_TOKEN` | Access Token |
-| Secret | `SUPABASE_PROJECT_REF` | 프로젝트 ref |
-| Secret | `SUPABASE_DB_PASSWORD` | DB 비밀번호 |
-| Variable | `SITE_URL` | Vercel 주소, 예: `https://soapo-ai.vercel.app` |
+Secret `SUPABASE_DB_PASSWORD`도 넣어 두면, 이후 `supabase/migrations/`에 새 파일이 push될 때 DB에도 자동으로 적용됩니다.
 
-3. **Actions → Supabase 설정 → Run workflow**를 누르면 자동으로:
-   - DB 테이블·권한을 만듭니다 (`supabase db push`).
-   - 로그인 설정을 맞춥니다: 사이트 주소, 로그인 링크가 돌아올 주소, 한국어 로그인 메일(링크 + 6자리 코드).
-   - Vercel에 넣을 `SUPABASE_URL`과 공개 키를 실행 기록에 출력합니다. ②를 직접 하는 경우에 쓰세요.
+> Vercel 미리보기 주소(브랜치별 배포)에서는 메일 링크가 운영 주소로 돌아갑니다. 미리보기에서는 메일 속 **6자리 코드**로 로그인하세요.
 
-`supabase/` 폴더가 바뀌어 push되면 이 워크플로가 다시 실행됩니다.
-
-> Vercel 미리보기 주소(브랜치별 배포)에서는 메일의 링크가 운영 주소로 돌아갑니다. 미리보기에서는 메일 속 **6자리 코드**로 로그인하세요.
-
-### ④ 환자에게 메일이 가게 하기
-Supabase 기본 메일은 **프로젝트 팀원 주소로만, 시간당 몇 통**만 보냅니다. 여기까지 하면 본인 메일로는 로그인할 수 있지만, 환자에게 보내려면 메일 발송 서비스가 필요합니다.
+### ③ 환자에게 메일이 가게 하기
+Supabase 기본 메일은 **프로젝트 팀원 주소로만, 시간당 몇 통**만 보냅니다. ②까지 하면 본인 메일로는 로그인할 수 있지만, 환자에게 보내려면 메일 발송 서비스가 필요합니다.
 
 1. [Resend](https://resend.com)에 가입하고 **본인 도메인을 인증**합니다. 도메인이 없으면 Resend는 본인 메일로만 보낼 수 있습니다.
 2. API Key를 만듭니다.
-3. GitHub에 아래 값을 추가하고 **Supabase 설정** 워크플로를 다시 실행합니다.
-
-| 종류 | 이름 | 값 |
-|---|---|---|
-| Secret | `RESEND_API_KEY` | Resend API 키 |
-| Variable | `MAIL_FROM` | 보내는 주소, 예: `login@내도메인.kr` |
-
-다른 메일 서비스를 쓰려면 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`를 Secret으로 넣으면 됩니다.
+3. 두 방법 중 하나로 연결합니다.
+   - **방법 A**: Supabase [SMTP 설정](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/smtp)에 입력합니다.
+     - Host `smtp.resend.com`, Port `465`, User `resend`, Password는 API Key
+     - Sender email은 인증한 도메인 주소
+   - **방법 B**: GitHub에 Secret `RESEND_API_KEY`와 Variable `MAIL_FROM`을 넣고 **Supabase 설정** 워크플로를 다시 실행합니다.
 
 ### 자동 테스트
 push할 때마다 `.github/workflows/ci.yml`이 GitHub 서버에서 로컬 Supabase를 띄우고, Vercel과 같은 방법으로 빌드한 사이트에 대해 권한 테스트와 전체 흐름 테스트를 돌립니다. 결과는 저장소 **Actions** 탭에서 볼 수 있습니다.

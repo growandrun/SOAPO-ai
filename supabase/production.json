@@ -1,0 +1,6 @@
+{
+  "_설명": "운영 Supabase 프로젝트의 공개 연결값. Publishable key는 브라우저에 공개되도록 만든 키이고, 데이터는 RLS가 보호합니다. Secret key는 절대 넣지 마세요.",
+  "projectRef": "ftgzlusvshpyadudqwzo",
+  "supabaseUrl": "https://ftgzlusvshpyadudqwzo.supabase.co",
+  "supabaseKey": "sb_publishable_6CIDR7PCDr5BP4ZC546ZbQ_2s8a7qUH"
+}

@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(24);
+select plan(26);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -22,6 +22,8 @@ select lives_ok($$ insert into soap_notes (patient_id, s, o, a, p, status) selec
 select throws_ok($$ update soap_notes set a = '고침' $$, 'P0001', null, '서명된 SOAP는 수정 불가');
 select throws_ok($$ update patients set user_id = auth.uid() $$, '42501', null, '치료사가 환자 계정 연결을 직접 바꿀 수 없음');
 select throws_ok($$ insert into patients (therapist_id, name) values ('00000000-0000-0000-0000-0000000000a2', '남의환자') $$, '42501', null, '다른 치료사 이름으로 환자 등록 불가');
+select lives_ok($$ insert into patients (therapist_id, name) values (auth.uid(), '코드재발급환자') $$, '두 번째 환자 등록');
+select matches((select reissue_invite(id) from patients where name = '코드재발급환자'), '^SOAP-[0-9A-F]{6}$', '초대 코드 재발급');
 
 -- 이후 테스트에서 쓸 환자 id와 초대 코드 (관리자 권한으로 조회)
 reset role;

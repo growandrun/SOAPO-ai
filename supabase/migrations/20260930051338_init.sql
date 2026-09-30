@@ -4,7 +4,7 @@
 -- 가입: 프로필은 클라이언트가 직접 만들 수 없고, 아래 RPC 함수로만 만든다.
 --       (환자는 초대 코드가 있어야 환자 기록과 연결된다)
 
-create extension if not exists "pgcrypto";
+create extension if not exists "pgcrypto" with schema extensions;
 
 -- 1. 사용자 프로필 ------------------------------------------------------------
 create type user_role as enum ('therapist', 'patient', 'admin');
@@ -19,8 +19,8 @@ create table profiles (
 );
 
 -- 2. 환자 ---------------------------------------------------------------------
-create function new_invite_code() returns text language sql volatile as $$
-  select 'SOAP-' || upper(substr(encode(gen_random_bytes(6), 'hex'), 1, 6));
+create function new_invite_code() returns text language sql volatile set search_path = '' as $$
+  select 'SOAP-' || upper(substr(encode(extensions.gen_random_bytes(6), 'hex'), 1, 6));
 $$;
 
 create table patients (
@@ -82,7 +82,7 @@ create table soap_notes (
 );
 
 -- 서명된 노트는 수정·삭제 불가 (의무기록 무결성)
-create function block_signed_change() returns trigger language plpgsql as $$
+create function block_signed_change() returns trigger language plpgsql set search_path = '' as $$
 begin
   if old.status = 'signed' then
     raise exception '서명된 기록은 수정하거나 삭제할 수 없습니다. 정정 기록을 새로 작성하세요.';
@@ -93,7 +93,7 @@ create trigger soap_notes_immutable before update or delete on soap_notes
   for each row execute function block_signed_change();
 
 -- 서명 시각은 서버가 기록
-create function stamp_signed_at() returns trigger language plpgsql as $$
+create function stamp_signed_at() returns trigger language plpgsql set search_path = '' as $$
 begin
   if new.status = 'signed' and new.signed_at is null then new.signed_at := now(); end if;
   return new;
