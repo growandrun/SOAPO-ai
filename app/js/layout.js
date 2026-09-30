@@ -21,7 +21,7 @@ export function topbar() {
   const p = cache.profile;
   const who = p.role === "therapist" ? "치료사용" : p.relation === "guardian" ? "보호자용" : "환자용";
   return `<header class="topbar">
-    <div class="brand"><span class="mark">SOAP·O</span><span>재활노트</span><span class="sub">${who}</span></div>
+    <div class="brand"><img class="logo" src="assets/logo.png" alt="SOAPO.ai" width="900" height="173"><span class="sub">${who}</span></div>
     <div class="spacer"></div>
     <div class="userchip"><span>${h(p.name)}<span class="email"> · ${h(state.email)}</span></span><button class="btn sm" data-act="logout">로그아웃</button></div>
   </header>`;

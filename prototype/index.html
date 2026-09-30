@@ -3,43 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>SOAPO 재활노트</title>
+<title>SOAPO.ai 데모</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
 <style>
 /* Layout: 치료사 = 환자 목록 레일 + 상세 작업공간 / 환자 = 모바일 우선 한 줄 카드 흐름 */
 :root {
-  --paper: #f3f5f4;
+  color-scheme: light;
+  --paper: #ffffff;
   --surface: #ffffff;
-  --ink: #17232e;
-  --ink-soft: #536170;
-  --line: #d9e0de;
-  --accent: #19715a;      /* 재활 초록: 진행/확정 */
-  --accent-soft: #dcefe8;
+  --ink: #15151c;
+  --ink-soft: #5d6070;
+  --line: #e6e6ee;
+  --accent: #5b3ee8;
+  --accent-soft: #f0ecff;
   --warn: #a8610b;
-  --warn-soft: #fbeedb;
-  --danger: #b3332b;
-  --danger-soft: #f8e1df;
+  --warn-soft: #fdf2e2;
+  --danger: #c0352c;
+  --danger-soft: #fdeceb;
   --info: #2f5f9e;
-  --info-soft: #e1eaf6;
+  --info-soft: #eaf1fb;
   --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --r: 10px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0f1519; --surface: #172026; --ink: #e5ecea; --ink-soft: #9aa8a5; --line: #2a3740;
-    --accent: #4cc39d; --accent-soft: #173a30; --warn: #e2a24c; --warn-soft: #3a2c16;
-    --danger: #ef7a70; --danger-soft: #3d1f1d; --info: #7fa9e6; --info-soft: #1b2a3f;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0f1519; --surface: #172026; --ink: #e5ecea; --ink-soft: #9aa8a5; --line: #2a3740;
-  --accent: #4cc39d; --accent-soft: #173a30; --warn: #e2a24c; --warn-soft: #3a2c16;
-  --danger: #ef7a70; --danger-soft: #3d1f1d; --info: #7fa9e6; --info-soft: #1b2a3f;
-  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -466,7 +453,7 @@ function render() {
 function topbar(u) {
   return `<div class="demo-banner">데모 모드 · 데이터는 이 브라우저에만 저장되고 AI 기능은 규칙 기반 예시입니다</div>
   <header class="topbar">
-    <div class="brand"><span class="mark">SOAP·O</span><span>재활노트</span><span class="sub">${u.role === "therapist" ? "치료사용" : "환자용"}</span></div>
+    <div class="brand"><span>SOAPO.ai</span><span class="sub">데모</span><span class="sub">${u.role === "therapist" ? "치료사용" : "환자용"}</span></div>
     <div class="spacer"></div>
     <div class="userchip"><span>${h(u.name)} · ${h(u.email)}</span><button class="btn sm" data-act="logout">로그아웃</button></div>
   </header>`;
@@ -515,7 +502,7 @@ function renderAuth() {
     </div>`;
   }
   app.innerHTML = `<main class="auth">
-    <div class="brand" style="font-size:1.4rem"><span class="mark">SOAP·O</span><span>재활노트</span></div>
+    <div class="brand" style="font-size:1.4rem"><span>SOAPO.ai</span><span class="sub">데모</span></div>
     <p class="muted">작업치료사의 SOAP 기록과 환자의 가정 재활을 한곳에서 잇습니다.</p>
     ${body}
     <button class="btn ghost small" data-act="reset">데모 데이터 초기화</button>

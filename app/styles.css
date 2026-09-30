@@ -1,35 +1,26 @@
-/* Layout: 치료사 = 환자 목록 레일 + 상세 작업공간 / 환자 = 모바일 우선 한 줄 카드 흐름 */
+/* Layout: 치료사 = 환자 목록 레일 + 상세 작업공간 / 환자 = 모바일 우선 한 줄 카드 흐름
+   테마: 흰 바탕 하나로 고정 (기기의 어두운 모드와 상관없이). 강조색은 로고의 보라→분홍 별에서 가져옴 */
 :root {
-  --paper: #f3f5f4;
+  color-scheme: light;
+  --paper: #ffffff;
   --surface: #ffffff;
-  --ink: #17232e;
-  --ink-soft: #536170;
-  --line: #d9e0de;
-  --accent: #19715a;      /* 재활 초록: 진행/확정 */
-  --accent-soft: #dcefe8;
+  --ink: #15151c;
+  --ink-soft: #5d6070;
+  --line: #e6e6ee;
+  --accent: #5b3ee8;      /* 로고 보라 (흰 글자와 대비 충분) */
+  --accent-soft: #f0ecff;
+  --brand-pink: #e559dc;
+  --brand-violet: #754afa;
+  --brand-grad: linear-gradient(135deg, var(--brand-pink), var(--brand-violet));
   --warn: #a8610b;
-  --warn-soft: #fbeedb;
-  --danger: #b3332b;
-  --danger-soft: #f8e1df;
+  --warn-soft: #fdf2e2;
+  --danger: #c0352c;
+  --danger-soft: #fdeceb;
   --info: #2f5f9e;
-  --info-soft: #e1eaf6;
+  --info-soft: #eaf1fb;
   --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --r: 10px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0f1519; --surface: #172026; --ink: #e5ecea; --ink-soft: #9aa8a5; --line: #2a3740;
-    --accent: #4cc39d; --accent-soft: #173a30; --warn: #e2a24c; --warn-soft: #3a2c16;
-    --danger: #ef7a70; --danger-soft: #3d1f1d; --info: #7fa9e6; --info-soft: #1b2a3f;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0f1519; --surface: #172026; --ink: #e5ecea; --ink-soft: #9aa8a5; --line: #2a3740;
-  --accent: #4cc39d; --accent-soft: #173a30; --warn: #e2a24c; --warn-soft: #3a2c16;
-  --danger: #ef7a70; --danger-soft: #3d1f1d; --info: #7fa9e6; --info-soft: #1b2a3f;
-  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -291,3 +282,12 @@ details.panel[open] > summary { margin-bottom: .2rem; }
 body { word-break: keep-all; overflow-wrap: break-word; }
 .dash .grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 980px) { .dash .grid2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* ===== 로고 ===== */
+.logo { display: block; height: 28px; width: auto; }
+.logo.lg { height: 40px; }
+.topbar .logo { height: 24px; }
+.brand { display: flex; align-items: center; gap: .6rem; }
+.hero .label { background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.aud:first-child { border-top-color: var(--brand-violet); }
+.aud:last-child { border-top-color: var(--brand-pink); }

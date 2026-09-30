@@ -2,7 +2,7 @@
 import { state } from "./state.js";
 import { h } from "./util.js";
 
-const brand = (size = "") => `<div class="brand ${size}"><span class="mark">SOAP·O</span><span>재활노트</span></div>`;
+const brand = (size = "") => `<div class="brand"><img class="logo ${size === "big" ? "lg" : ""}" src="assets/logo.png" alt="SOAPO.ai" width="900" height="173"></div>`;
 
 export function landingHtml() {
   return `<div class="landing">
@@ -74,7 +74,7 @@ export function landingHtml() {
   </section>
 
   <footer class="lfoot small muted">
-    <span>SOAPO 재활노트 · 교육·연구용 서비스입니다. 응급 상황은 119에 연락하세요.</span>
+    <span>SOAPO.ai · 교육·연구용 서비스입니다. 응급 상황은 119에 연락하세요.</span>
     <a href="demo/">가짜 데이터로 먼저 둘러보기</a>
   </footer>
 </div>`;
