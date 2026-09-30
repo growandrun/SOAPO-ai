@@ -52,7 +52,7 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
 | 앱이 쓸 연결값 (`supabase/production.json`) | ✅ 저장소에 들어 있음 (공개 키라 괜찮음) |
 | ① Vercel에 저장소 연결 | ✅ https://soapoai.vercel.app (push하면 자동 배포) |
 | ② 로그인 설정 (사이트 주소, 한국어 메일) | 할 일 |
-| ③ 환자에게 메일 보내기 (Resend) | 할 일 |
+| ③ 환자에게 메일 보내기 (무료 Gmail) | 할 일 |
 
 ### ① Vercel에 저장소 연결 (완료)
 1. [vercel.com](https://vercel.com)에 GitHub 계정으로 로그인합니다.
@@ -84,16 +84,31 @@ Secret `SUPABASE_DB_PASSWORD`도 넣어 두면, 이후 `supabase/migrations/`에
 
 > Vercel 미리보기 주소(브랜치별 배포)에서는 메일 링크가 운영 주소로 돌아갑니다. 미리보기에서는 메일 속 **6자리 코드**로 로그인하세요.
 
-### ③ 환자에게 메일이 가게 하기
-Supabase 기본 메일은 **프로젝트 팀원 주소로만, 시간당 몇 통**만 보냅니다. ②까지 하면 본인 메일로는 로그인할 수 있지만, 환자에게 보내려면 메일 발송 서비스가 필요합니다.
+### ③ 환자에게 메일이 가게 하기 (무료 Gmail, 5분)
+Supabase 기본 메일은 **프로젝트 팀원 주소로만, 시간당 몇 통**만 보냅니다. 무료 Gmail 계정으로 보내면 도메인 없이 누구에게나 **하루 500명까지** 보낼 수 있습니다.
 
-1. [Resend](https://resend.com)에 가입하고 **본인 도메인을 인증**합니다. 도메인이 없으면 Resend는 본인 메일로만 보낼 수 있습니다.
-2. API Key를 만듭니다.
-3. 두 방법 중 하나로 연결합니다.
-   - **방법 A**: Supabase [SMTP 설정](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/smtp)에 입력합니다.
-     - Host `smtp.resend.com`, Port `465`, User `resend`, Password는 API Key
-     - Sender email은 인증한 도메인 주소
-   - **방법 B**: GitHub에 Secret `RESEND_API_KEY`와 Variable `MAIL_FROM`을 넣고 **Supabase 설정** 워크플로를 다시 실행합니다.
+1. **Gmail 앱 비밀번호 만들기**
+   - Google 계정에 [2단계 인증](https://myaccount.google.com/signinoptions/two-step-verification)을 켭니다.
+   - [앱 비밀번호](https://myaccount.google.com/apppasswords)에서 이름을 `SOAPO`로 만듭니다.
+   - 나온 **16자리 비밀번호**를 복사합니다. 이 비밀번호는 저장소나 채팅에 올리지 마세요.
+2. **Supabase에 입력하기**: [Authentication → SMTP Settings](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/smtp)에서 **Enable Custom SMTP**를 켜고 아래 값을 넣습니다.
+
+| 항목 | 값 |
+|---|---|
+| Sender email | Gmail 주소 (예: `growandrun07@gmail.com`) |
+| Sender name | `SOAPO 재활노트` |
+| Host | `smtp.gmail.com` |
+| Port | `465` |
+| Username | Gmail 주소 |
+| Password | 16자리 앱 비밀번호 (띄어쓰기 없이) |
+
+3. **발송 한도 조정**: [Rate Limits](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/rate-limits)에서 시간당 이메일 수를 `20` 정도로 둡니다. Gmail 하루 한도(500)를 넘지 않게 하기 위해서입니다.
+
+GitHub Actions로 자동 적용하려면 위 표 대신 다음 두 값을 넣고 **Supabase 설정** 워크플로를 실행하면 됩니다.
+- Variable `GMAIL_ADDRESS`: Gmail 주소
+- Secret `GMAIL_APP_PASSWORD`: 16자리 앱 비밀번호
+
+환자가 늘어 하루 500명을 넘거나 병원 이름으로 보내야 할 때는 본인 도메인과 Resend를 쓰세요. Secret `RESEND_API_KEY`와 Variable `MAIL_FROM`을 넣으면 됩니다.
 
 ### 자동 테스트
 push할 때마다 `.github/workflows/ci.yml`이 GitHub 서버에서 로컬 Supabase를 띄우고, Vercel과 같은 방법으로 빌드한 사이트에 대해 권한 테스트와 전체 흐름 테스트를 돌립니다. 결과는 저장소 **Actions** 탭에서 볼 수 있습니다.

@@ -10,6 +10,7 @@
      SITE_URL               배포 주소, 예: https://soapoai.vercel.app
    선택
      SUPABASE_PUBLISHABLE_KEY  비우면 API에서 자동으로 가져옴
+     GMAIL_ADDRESS + GMAIL_APP_PASSWORD  무료 Gmail로 메일 발송 (추천, 도메인 불필요)
      RESEND_API_KEY + MAIL_FROM     Resend로 메일 발송 (MAIL_FROM 예: login@내도메인.kr)
      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM  다른 SMTP 서비스
      CONFIG_OUT             config.js를 쓸 경로 (기본: 쓰지 않음)
@@ -54,7 +55,11 @@ const auth = {
 };
 
 let smtp = "없음 (Supabase 기본 발송: 팀원 주소로만, 시간당 소량)";
-if (env.RESEND_API_KEY && env.MAIL_FROM) {
+if (env.GMAIL_ADDRESS && env.GMAIL_APP_PASSWORD) {
+  // 무료 Gmail: 하루 수신자 500명까지, 도메인 없이 누구에게나 발송. 2단계 인증 + 앱 비밀번호(16자리) 필요
+  Object.assign(auth, { smtp_host: "smtp.gmail.com", smtp_port: "465", smtp_user: env.GMAIL_ADDRESS, smtp_pass: env.GMAIL_APP_PASSWORD.replace(/\s+/g, ""), smtp_admin_email: env.GMAIL_ADDRESS, smtp_sender_name: "SOAPO 재활노트", rate_limit_email_sent: 20 });
+  smtp = `Gmail (${env.GMAIL_ADDRESS}, 하루 500명까지)`;
+} else if (env.RESEND_API_KEY && env.MAIL_FROM) {
   Object.assign(auth, { smtp_host: "smtp.resend.com", smtp_port: "465", smtp_user: "resend", smtp_pass: env.RESEND_API_KEY, smtp_admin_email: env.MAIL_FROM, smtp_sender_name: "SOAPO 재활노트", rate_limit_email_sent: 60 });
   smtp = `Resend (${env.MAIL_FROM})`;
 } else if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.MAIL_FROM) {
