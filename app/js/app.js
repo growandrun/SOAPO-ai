@@ -98,7 +98,8 @@ function topbar() {
 /* ================= 설정 안내 / 오류 ================= */
 function setupHtml() {
   return `<main class="auth"><div class="card"><h2>Supabase 연결이 필요합니다</h2>
-    <p class="small">app/config.js에 Supabase 프로젝트 주소와 Publishable key를 넣어 주세요. 방법은 README의 "실제 서비스 설정"을 참고하세요.</p></div></main>`;
+    <p class="small">아직 Supabase가 연결되지 않았습니다. README의 "실제 서비스로 올리기"를 따라 설정하면 이 화면이 로그인 화면으로 바뀝니다.</p>
+    <p class="small">그동안 <a href="demo/">데모</a>에서 가짜 데이터로 기능을 체험할 수 있습니다.</p></div></main>`;
 }
 function errorHtml() {
   return `<main class="auth"><div class="card"><h2>불러오지 못했습니다</h2><p class="small">${h(state.error)}</p>

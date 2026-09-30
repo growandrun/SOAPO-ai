@@ -1,0 +1,29 @@
+name: 테스트
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 로컬 Supabase 시작
+        run: npx supabase start -x studio,imgproxy,edge-runtime,logflare,vector,postgres-meta,storage-api,supavisor
+      - name: 권한 테스트 (RLS)
+        run: npx supabase test db
+      - name: 브라우저 설치
+        run: npx playwright install --with-deps chromium
+      - name: 앱 서버 시작
+        run: |
+          npm run dev > /tmp/http.log 2>&1 &
+          for i in $(seq 1 20); do curl -sf http://localhost:3000/ > /dev/null && break; sleep 1; done
+      - name: 전체 흐름 테스트 (치료사·환자 두 브라우저)
+        run: npm run test:e2e
