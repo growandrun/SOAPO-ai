@@ -21,9 +21,11 @@ jobs:
         run: npx supabase test db
       - name: 브라우저 설치
         run: npx playwright install --with-deps chromium
-      - name: 앱 서버 시작
+      - name: 배포용 빌드 (Vercel과 같은 scripts/build.mjs) 후 서버 시작
         run: |
-          npm run dev > /tmp/http.log 2>&1 &
+          eval "$(npx supabase status -o env | grep -E '^(API_URL|PUBLISHABLE_KEY)=')"
+          SUPABASE_URL="$API_URL" SUPABASE_PUBLISHABLE_KEY="$PUBLISHABLE_KEY" node scripts/build.mjs
+          python3 -m http.server 3000 --bind 127.0.0.1 --directory dist > /tmp/http.log 2>&1 &
           for i in $(seq 1 20); do curl -sf http://localhost:3000/ > /dev/null && break; sleep 1; done
       - name: 전체 흐름 테스트 (치료사·환자 두 브라우저)
         run: npm run test:e2e

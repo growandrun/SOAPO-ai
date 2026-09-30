@@ -32,6 +32,7 @@ AI 검진: 수행률↓, 통증↑, 각도↓, 목표 기한, 기록 공백
 | 영역 | 선택 | 이유 |
 |---|---|---|
 | 프론트엔드 | 빌드 없는 정적 웹앱 (`app/`, ES 모듈) | 휴대폰·노트북 브라우저로 접속, 어떤 정적 호스팅에도 폴더째 올릴 수 있음 |
+| 배포 | Vercel (GitHub 연동, `vercel.json`) | push하면 자동 배포, 브랜치별 미리보기, 환경 변수로 Supabase 연결 |
 | 로그인 | Supabase Auth 이메일 매직링크 + 6자리 코드 | 비밀번호 없음. 메일을 다른 기기에서 열어도 코드로 로그인 |
 | DB | Supabase(PostgreSQL) + RLS + 열 단위 권한 | "담당 환자만" 보이도록 DB가 보장 → `supabase/migrations/` |
 | 가입 | DB 함수(RPC) `register_therapist`, `redeem_invite` | 환자는 초대 코드로만 환자 기록과 연결. 클라이언트가 역할을 직접 정할 수 없음 |

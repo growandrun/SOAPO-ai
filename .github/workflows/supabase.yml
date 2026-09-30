@@ -1,0 +1,64 @@
+name: Supabase 설정
+
+# 운영 Supabase 프로젝트에 DB 구조(migrations)와 로그인 설정을 적용한다.
+# 사이트 배포는 Vercel이 GitHub 저장소와 연결되어 자동으로 한다 (vercel.json).
+#
+# 저장소 Settings → Secrets and variables → Actions
+#   Secret   SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD  (필수)
+#   Variable SITE_URL  Vercel 주소, 예: https://soapo-ai.vercel.app  (로그인 메일 링크가 돌아올 곳)
+#   선택: Secret RESEND_API_KEY + Variable MAIL_FROM  (환자에게 메일 보내기)
+#         또는 Secret SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS + Variable MAIL_FROM
+
+on:
+  push:
+    paths:
+      - "supabase/**"
+      - "scripts/configure-supabase.mjs"
+      - ".github/workflows/supabase.yml"
+  workflow_dispatch:
+
+jobs:
+  apply:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      MAIL_FROM: ${{ vars.MAIL_FROM }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: 설정값 확인
+        id: check
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_PROJECT_REF" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::notice::Supabase 비밀값(SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD)이 없어 건너뜁니다. README의 설정 순서를 참고하세요."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.ready == 'true'
+        run: npm ci
+      - name: DB 구조 적용
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          npx supabase db push
+      - name: 로그인 설정 (사이트 주소, 한국어 메일, 메일 발송)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::warning::Variable SITE_URL(Vercel 주소)이 없어 로그인 설정을 건너뜁니다. 넣은 뒤 이 워크플로를 다시 실행하세요."
+            exit 0
+          fi
+          node scripts/configure-supabase.mjs

@@ -7,7 +7,7 @@
    필요한 환경 변수
      SUPABASE_ACCESS_TOKEN  supabase.com/dashboard/account/tokens 에서 만든 토큰
      SUPABASE_PROJECT_REF   프로젝트 ref (대시보드 주소의 20자리 영문)
-     SITE_URL               배포 주소, 예: https://growandrun.github.io/SOAPO-ai/
+     SITE_URL               배포 주소, 예: https://soapo-ai.vercel.app
    선택
      SUPABASE_PUBLISHABLE_KEY  비우면 API에서 자동으로 가져옴
      RESEND_API_KEY + MAIL_FROM     Resend로 메일 발송 (MAIL_FROM 예: login@내도메인.kr)
@@ -44,7 +44,7 @@ const subject = "SOAPO 재활노트 로그인";
 
 const auth = {
   site_url: site,
-  uri_allow_list: `${site}**`, // 내 사이트 경로로만 돌아오게 (github.io 전체를 허용하면 다른 사람 사이트로 로그인 토큰이 샐 수 있음)
+  uri_allow_list: `${site}**`, // 내 사이트 경로로만 돌아오게 (vercel.app 전체를 허용하면 다른 사람 사이트로 로그인 토큰이 샐 수 있음)
   mailer_subjects_magic_link: subject,
   mailer_templates_magic_link_content: template,
   mailer_subjects_confirmation: subject,
@@ -71,6 +71,7 @@ if (!key) {
   key = keys.find((k) => k.type === "publishable")?.api_key ?? keys.find((k) => k.name === "anon")?.api_key;
   if (!key && !dry) throw new Error("Publishable key를 찾지 못했습니다. SUPABASE_PUBLISHABLE_KEY 변수로 직접 넣어 주세요.");
 }
+if (key) console.log(`✓ Vercel 환경 변수에 넣을 값 (공개 키라 노출돼도 괜찮습니다)\n    SUPABASE_URL = https://${ref}.supabase.co\n    SUPABASE_PUBLISHABLE_KEY = ${key}`);
 if (env.CONFIG_OUT) {
   await writeFile(env.CONFIG_OUT, `// 배포 시 자동 생성 (scripts/configure-supabase.mjs)\nwindow.SOAPO_CONFIG = ${JSON.stringify({ supabaseUrl: `https://${ref}.supabase.co`, supabaseKey: key ?? "" }, null, 2)};\n`);
   console.log(`✓ ${env.CONFIG_OUT} 작성 (https://${ref}.supabase.co)`);
