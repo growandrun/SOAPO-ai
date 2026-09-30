@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(59);
+select plan(67);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -33,6 +33,12 @@ select lives_ok($$ insert into patients (therapist_id, name) values (auth.uid(),
 select matches((select reissue_invite(id) from patients where name = '코드재발급환자'), '^SOAP-[0-9A-F]{6}$', '초대 코드 재발급');
 
 select lives_ok($$ insert into appointments (patient_id, starts_at, kind) select id, now() + interval '1 day', 'session' from patients where name = '테스트환자' $$, '치료사가 치료 일정 추가');
+select lives_ok($$ update patients set chart_no = 'A-1001', precautions = '{fall,dysphagia}', weight_bearing = 'PWB', diet_food = '5', diagnosis = '뇌졸중' where name = '테스트환자' $$, '치료사가 차트번호·안전 정보 입력');
+select throws_ok($$ update patients set chart_no = 'A-1001' where name = '코드재발급환자' $$, '23505', null, '같은 치료사 안에서 차트번호 중복 불가');
+select lives_ok($$ insert into assessments (patient_id, tool, value, max_value, details) select id, 'K-MBI', 60, 100, '{"items":{"feeding":8}}' from patients where name = '테스트환자' $$, '평가 세부 항목 저장');
+select lives_ok($$ update patients set status = 'discharged', discharged_on = current_date, discharge_reason = 'goal_met' where name = '코드재발급환자' $$, '치료 종결 처리');
+select lives_ok($$ update profiles set prefs = '{"assistScale":"fim"}' where id = auth.uid() $$, '치료사 본인 설정 저장');
+select throws_ok($$ update profiles set verified = true where id = auth.uid() $$, '42501', null, '면허 확인 여부는 스스로 바꿀 수 없음');
 select lives_ok($$ insert into visits (patient_id, appointment_id, visited_on, duration_min, items, observations)
   select p.id, a.id, current_date, 30, '[{"code":"dumbbell","side":"R","weight":2,"sets":3,"reps":10},{"code":"eating","assist":"MinA","minutes":15}]', '{guardian,pain}'
   from patients p join appointments a on a.patient_id = p.id where p.name = '테스트환자' $$, '치료사가 내원기록 저장 (치료 항목·체크리스트)');
@@ -56,6 +62,7 @@ select throws_ok($$ insert into appointments (patient_id, starts_at) values (cur
 select is((select count(*) from appointments), 0::bigint, '다른 치료사의 일정은 안 보임');
 select throws_ok($$ insert into visits (patient_id, visited_on) values (current_setting('test.pid')::uuid, current_date) $$, '42501', null, '남의 환자에 내원기록 추가 불가');
 select is((select count(*) from visits), 0::bigint, '다른 치료사의 내원기록은 안 보임');
+select lives_ok($$ update profiles set prefs = '{"x":1}' where id = '00000000-0000-0000-0000-0000000000a1' $$, '다른 사람 설정 수정 시도 (적용되는 행 없음)');
 select throws_ok($$ insert into soap_notes (patient_id, s, status, amends_id, amend_reason) values (current_setting('test.pid')::uuid, 's', 'signed', gen_random_uuid(), '남의 기록') $$, '42501', null, '남의 환자 기록 정정 불가');
 select lives_ok($$ update patients set birth_date = '2000-01-01' where id = current_setting('test.pid')::uuid $$, '다른 치료사의 수정 시도 (적용되는 행 없음)');
 
@@ -85,6 +92,7 @@ set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000a1","
 select is((select count(*) from symptom_logs), 1::bigint, '담당 치료사는 환자 컨디션 기록을 봄');
 select is((select birth_date from patients where name = '테스트환자'), '1958-03-12'::date, '다른 치료사가 바꾸려 해도 생년월일 그대로');
 select is((select count(*) from thread_reads), 0::bigint, '다른 사람의 읽음 표시는 안 보임');
+select is((select prefs->>'assistScale' from profiles where id = auth.uid()), 'fim', '다른 사람이 설정을 바꾸지 못함');
 set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}';
 select is((select count(*) from symptom_logs), 0::bigint, '다른 치료사는 컨디션 기록을 못 봄');
 

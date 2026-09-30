@@ -23,6 +23,7 @@ export function patientHtml() {
   const views = { home: homeHtml, exercise: exerciseHtml, records: recordsHtml, msg: msgHtml };
   return `${topbar()}<main class="papp">
     <div class="hello"><span class="label">${new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" })}</span>${hello}</div>
+    ${p.status === "discharged" ? `<div class="banner static"><b>치료가 종결되었습니다${p.dischargedOn ? ` (${fmtDate(p.dischargedOn)})` : ""}</b><span>지난 기록은 계속 볼 수 있어요. 다시 치료를 받게 되면 치료사가 다시 열어 드려요.</span></div>` : ""}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-act="ptab" data-tab="${k}" aria-selected="${state.ptab === k}">${l}</button>`).join("")}</div>
     ${views[state.ptab](p)}
   </main>`;
@@ -55,8 +56,8 @@ function homeHtml(p) {
       </section>
       <section class="panel pcard pcard-ring">
         ${ring(done, need)}
-        <div><span class="label">오늘 운동</span><strong>${need ? (done >= need ? "모두 했어요" : `${need - done}개 남았어요`) : "처방된 운동 없음"}</strong>
-          ${need && done < need ? `<button class="btn primary sm" data-act="ptab" data-tab="exercise">운동하러 가기</button>` : ""}</div>
+        <div><span class="label">오늘 운동</span><strong>${need ? (done >= need ? "모두 했어요" : `${need - done}개 남았어요`) : "처방된 운동 없음"}</strong></div>
+        ${need && done < need ? `<button class="btn primary pcard-go" data-act="ptab" data-tab="exercise">운동하러 가기</button>` : ""}
       </section>
       <section class="panel pcard">
         <span class="label">꾸준함</span>

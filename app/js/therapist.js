@@ -5,7 +5,9 @@ import { state } from "./state.js";
 import { h, localDate, fmtDate, DAY } from "./util.js";
 import { lineChart, spark } from "./charts.js";
 import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday, fmtBirth } from "./layout.js";
-import { FIELDS, GROUPS, TREATMENTS, OBSERVATIONS, treatment, levelsOf, levelLabelOf, itemSummary, observation } from "./catalog.js";
+import { FIELDS, GROUPS, TREATMENTS, OBSERVATIONS, treatment, levelsOf, levelLabelOf, itemSummary, observation, assistOptions,
+  PACKS, DEFAULT_PACKS, ASSIST_SCALES, PRECAUTIONS, WEIGHT_BEARING, DIET_FOOD, DIET_DRINK, SIDES, DISCHARGE_REASONS, labelOf, safetyTags } from "./catalog.js";
+import { KMBI, KMBI_LEVELS, kmbiSteps, MMSE, MMT_MUSCLES, MMT_GRADES, ROM_MOTIONS, ASSESS_KINDS, isRegional, fmtScore } from "./assessments.js";
 
 const LEVEL_ORDER = { danger: 0, warn: 1, info: 2 };
 const plusDays = (n) => localDate(new Date(Date.now() + n * DAY));
@@ -13,30 +15,58 @@ const plusDays = (n) => localDate(new Date(Date.now() + n * DAY));
 export function therapistHtml() {
   if (state.selected && !view.patient(state.selected)) state.selected = null;
   if (state.tView === "patient" && !state.selected) state.tView = "dashboard";
-  const main = state.tView === "new" || !cache.patients.length ? newPatientHtml()
+  const main = state.tView === "settings" ? settingsHtml()
+    : state.tView === "new" || !cache.patients.length ? newPatientHtml()
     : state.tView === "patient" ? patientDetailHtml(view.patient(state.selected))
     : dashboardHtml();
   return `${topbar()}<div class="work"><aside class="rail">${railHtml()}</aside><main class="main">${main}</main></div>`;
 }
 
+/** 안전 정보 표시 (주의사항이 있으면 빨간 테두리 표시) */
+const safetyPill = (p) => { const t = safetyTags(p); return t.length ? `<span class="pill safety" title="${h(t.join(", "))}">⚠ 안전 ${t.length}</span>` : ""; };
+
 export function railHtml() {
-  const pts = cache.patients;
+  const all = cache.patients, act = view.active(), closed = all.length - act.length;
+  const list = state.showDischarged ? all : act;
   return `<button class="pitem navitem" data-act="t-dashboard" aria-current="${state.tView === "dashboard"}"><strong>대시보드</strong><span class="small muted">오늘 일정 · 확인 필요 · 환자 현황</span></button>
-  <div class="toolbar" style="justify-content:space-between"><span class="label">담당 환자 ${pts.length}명</span><button class="btn sm" data-act="new-patient">+ 환자 등록</button></div>
-  <div class="plist">${pts.map((x) => {
-    const al = AI.screen(x, view.ctx(x.id));
+  <div class="toolbar" style="justify-content:space-between"><span class="label">담당 환자 ${act.length}명</span><button class="btn sm" data-act="new-patient">+ 환자 등록</button></div>
+  ${all.length ? `<input type="search" id="rail-search" placeholder="이름·차트번호 검색" aria-label="환자 검색" autocomplete="off">` : ""}
+  <div class="plist">${list.map((x) => {
+    const closedP = x.status === "discharged";
+    const al = closedP ? [] : AI.screen(x, view.ctx(x.id));
     const d = al.filter((y) => y.level === "danger").length, w = al.filter((y) => y.level === "warn").length;
     const un = view.unread(x.id);
-    return `<button class="pitem" data-act="pick" data-id="${x.id}" aria-current="${state.tView === "patient" && x.id === state.selected}">
-      <div class="row"><strong>${h(x.name)}</strong></div>
+    return `<button class="pitem" data-act="pick" data-id="${x.id}" data-search="${h(`${x.name} ${x.chartNo ?? ""}`.toLowerCase())}" aria-current="${state.tView === "patient" && x.id === state.selected}">
+      <div class="row"><strong>${h(x.name)}</strong>${x.chartNo ? `<span class="small muted mono">#${h(x.chartNo)}</span>` : ""}</div>
       <span class="small muted mono">${x.birthDate ? fmtBirth(x.birthDate) : "생년월일 미입력"}</span>
-      <div class="flags">${d ? `<span class="pill danger">위험 ${d}</span>` : ""}${w ? `<span class="pill warn">주의 ${w}</span>` : ""}${!d && !w ? `<span class="pill ok">양호</span>` : ""}${un ? `<span class="pill info">메시지 ${un}</span>` : ""}${x.userId ? "" : `<span class="pill plain">앱 미가입</span>`}</div>
-    </button>`; }).join("")}</div>`;
+      <div class="flags">${closedP ? `<span class="pill plain">종결</span>` : `${d ? `<span class="pill danger">위험 ${d}</span>` : ""}${w ? `<span class="pill warn">주의 ${w}</span>` : ""}${!d && !w ? `<span class="pill ok">양호</span>` : ""}`}${safetyPill(x)}${un ? `<span class="pill info">메시지 ${un}</span>` : ""}${x.userId || closedP ? "" : `<span class="pill plain">앱 미가입</span>`}</div>
+    </button>`; }).join("")}</div>
+  <p class="small muted rail-empty" hidden>찾는 환자가 없습니다.</p>
+  ${closed ? `<button class="linklike small" data-act="toggle-discharged">${state.showDischarged ? "종결 환자 숨기기" : `종결 환자 ${closed}명 보기`}</button>` : ""}
+  <button class="pitem navitem" data-act="t-settings" aria-current="${state.tView === "settings"}"><strong>설정</strong><span class="small muted">도움 수준 표기 · 치료 분야</span></button>`;
+}
+
+/** 치료사 설정: 도움 수준 표기, 체크리스트에 보일 치료 분야 */
+function settingsHtml() {
+  const prefs = cache.profile.prefs ?? {};
+  const packs = prefs.packs ?? DEFAULT_PACKS, sc = prefs.assistScale ?? "ot";
+  return `<section class="panel" style="max-width:46rem"><h2>설정</h2>
+    <form id="f-settings" class="visitform">
+      <fieldset class="vgroup"><legend>도움 수준 표기</legend>
+        <p class="small muted">저장되는 값은 같고, 화면과 SOAP 초안에 보이는 방식만 바뀝니다. 병원에서 쓰는 척도에 맞춰 고르세요.</p>
+        ${ASSIST_SCALES.map(([k, l]) => `<label class="chk"><input type="radio" name="scale" value="${k}" ${sc === k ? "checked" : ""}><span>${l}</span></label>`).join("")}
+      </fieldset>
+      <fieldset class="vgroup"><legend>내원기록에 보일 치료 분야</legend>
+        <p class="small muted">고른 분야의 치료만 체크리스트에 나옵니다. 여러 개를 골라도 됩니다.</p>
+        ${PACKS.map(([k, l, d]) => `<label class="chk"><input type="checkbox" name="pack" value="${k}" ${packs.includes(k) ? "checked" : ""}><span><b>${l}</b> <span class="small muted">${d}</span></span></label>`).join("")}
+      </fieldset>
+      <div class="toolbar"><button class="btn primary" type="submit">설정 저장</button></div>
+    </form></section>`;
 }
 
 /* ================= 대시보드 ================= */
 function dashboardHtml() {
-  const pts = cache.patients;
+  const pts = view.active();
   const today = localDate();
   const byTime = (a, b) => a.startsAt.localeCompare(b.startsAt);
   const todays = cache.appointments.filter((a) => a.date === today).sort(byTime);
@@ -55,7 +85,7 @@ function dashboardHtml() {
     const noteToday = view.notes(a.patientId).some((n) => n.date === a.date);
     return `<li class="appt">
       <span class="mono appt-time">${withDate ? fmtDay(a.startsAt) + " " : ""}${fmtTime(a.startsAt)}</span>
-      <span class="appt-who"><button class="linklike" data-act="pick" data-id="${a.patientId}">${h(p?.name ?? "")}</button> <span class="small muted">${KIND[a.kind]} · ${a.duration}분</span>${a.note ? `<span class="small muted"> · ${h(a.note)}</span>` : ""}</span>
+      <span class="appt-who"><button class="linklike" data-act="pick" data-id="${a.patientId}">${h(p?.name ?? "")}</button> ${p ? safetyPill(p) : ""} <span class="small muted">${KIND[a.kind]} · ${a.duration}분</span>${a.note ? `<span class="small muted"> · ${h(a.note)}</span>` : ""}</span>
       <span class="appt-act">${a.status === "scheduled" && !withDate
         ? `<button class="btn sm" data-act="appt-status" data-id="${a.id}" data-status="done">완료</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="no_show">결석</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="cancelled">취소</button>`
         : `<span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span>`}
@@ -103,7 +133,7 @@ function dashboardHtml() {
 }
 
 function caseloadTable() {
-  const rows = cache.patients.map((p) => {
+  const rows = view.active().map((p) => {
     const ctx = view.ctx(p.id);
     const st = AI.homeStats(ctx.programs, ctx.sessions);
     const pains = ctx.symptoms.slice(-7).map((x) => x.pain);
@@ -147,7 +177,7 @@ function weekTable() {
 }
 
 function apptForm(patientId) {
-  const opts = cache.patients.map((p) => `<option value="${p.id}" ${p.id === patientId ? "selected" : ""}>${h(p.name)}</option>`).join("");
+  const opts = view.active().map((p) => `<option value="${p.id}" ${p.id === patientId ? "selected" : ""}>${h(p.name)}</option>`).join("");
   return `<form id="f-appt" class="formgrid appt-form" style="margin-top:.6rem">
     ${patientId ? `<input type="hidden" id="ap-patient" value="${patientId}">` : `<div class="field wide"><label class="label" for="ap-patient">환자</label><select id="ap-patient" required>${opts}</select></div>`}
     <div class="field"><label class="label" for="ap-date">날짜</label><input type="date" id="ap-date" value="${localDate()}" required></div>
@@ -166,22 +196,54 @@ function apptForm(patientId) {
 }
 
 /* ================= 환자 상세 ================= */
+const sel = (id, list, v, empty = "선택 안 함") => `<select id="${id}"><option value="">${empty}</option>${list.map(([k, l]) => `<option value="${k}" ${v === k ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+
 function patientDetailHtml(p) {
   const un = view.unread(p.id);
-  const tabs = [["overview", "요약·AI 검진"], ["schedule", "일정·컨디션"], ["visits", "내원기록"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
+  const tabs = [["overview", "요약·AI 검진"], ["assess", "평가"], ["schedule", "일정·컨디션"], ["visits", "내원기록"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
   const member = cache.names[p.userId];
-  return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}</h1>
-      <div class="meta">${p.birthDate ? `<span>생년월일 ${fmtBirth(p.birthDate)}</span>` : `<span class="pill warn">생년월일 미입력</span>`}${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
+  const tags = safetyTags(p);
+  const closed = p.status === "discharged";
+  return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}${closed ? ` <span class="pill plain">치료 종결</span>` : ""}</h1>
+      <div class="meta">${p.chartNo ? `<span>차트 <b class="mono">${h(p.chartNo)}</b></span>` : ""}${p.birthDate ? `<span>생년월일 ${fmtBirth(p.birthDate)}</span>` : `<span class="pill warn">생년월일 미입력</span>`}${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
+        ${closed ? `<span>종결 ${h(p.dischargedOn ?? "")} · ${h(labelOf(DISCHARGE_REASONS, p.dischargeReason) ?? "")}</span>` : ""}
         ${p.userId ? `<span class="pill ok">앱 가입${member && member !== p.name ? ` · ${h(member)}` : ""}</span>` : `<span>초대 코드 <b class="mono">${h(p.invite ?? "")}</b> <button class="btn sm" data-act="copy-invite">복사</button> <button class="btn sm ghost" data-act="reissue">새 코드</button></span>`}</div></div></div>
+    ${tags.length || p.precautionNote ? `<div class="safety-bar"><b>⚠ 안전 주의</b>${tags.map((t) => `<span class="pill safety">${h(t)}</span>`).join("")}${p.precautionNote ? `<span class="small">${h(p.precautionNote)}</span>` : ""}</div>` : ""}
+    <div class="pinfo-row">
     <details class="pinfo" ${p.birthDate ? "" : "open"}><summary class="small">기본 정보 수정</summary>
       <form id="f-pinfo" class="formgrid" style="margin-top:.5rem">
         <div class="field"><label class="label" for="pi-name">이름</label><input type="text" id="pi-name" required value="${h(p.name)}"></div>
         <div class="field"><label class="label" for="pi-birth">생년월일</label><input type="date" id="pi-birth" required min="1900-01-01" max="${localDate()}" value="${p.birthDate ?? ""}"></div>
         <div class="field"><label class="label" for="pi-visit">첫 내원일</label><input type="date" id="pi-visit" value="${p.firstVisit ?? ""}"></div>
+        <div class="field"><label class="label" for="pi-chart">차트번호 (선택)</label><input type="text" id="pi-chart" maxlength="40" value="${h(p.chartNo ?? "")}" autocomplete="off"></div>
         <div class="wide"><button class="btn primary sm" type="submit">저장</button></div>
       </form></details>
+    <details class="pinfo" ${state.safetyOpen ? "open" : ""}><summary class="small">안전 정보 ${tags.length ? `(${tags.length})` : "(선택)"}</summary>
+      <form id="f-safety" class="visitform" style="margin-top:.5rem">
+        <p class="small muted">등록에는 필요 없습니다. 치료 중 안전을 위해 필요한 것만 골라 적으세요. 내원기록을 쓸 때 맨 위에 표시됩니다.</p>
+        <div class="formgrid">
+          <div class="field"><label class="label" for="sf-dx">진단명 (선택)</label><input type="text" id="sf-dx" maxlength="200" value="${h(p.diagnosis ?? "")}" placeholder="예: 좌측 MCA 경색"></div>
+          <div class="field"><label class="label" for="sf-onset">발병일 (선택)</label><input type="date" id="sf-onset" value="${p.onset ?? ""}" max="${localDate()}"></div>
+          <div class="field"><label class="label" for="sf-side">불편한 쪽 (마비측)</label>${sel("sf-side", SIDES, p.affectedSide, "선택")}</div>
+          <div class="field"><label class="label" for="sf-wb">체중부하</label>${sel("sf-wb", WEIGHT_BEARING, p.weightBearing, "제한 없음")}</div>
+          <div class="field"><label class="label" for="sf-food">식이 단계 (IDDSI 음식)</label>${sel("sf-food", DIET_FOOD, p.dietFood, "제한 없음")}</div>
+          <div class="field"><label class="label" for="sf-drink">음료 (IDDSI)</label>${sel("sf-drink", DIET_DRINK, p.dietDrink, "제한 없음")}</div>
+        </div>
+        <fieldset class="vgroup"><legend>주의사항</legend><div class="chkgrid">${PRECAUTIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" name="prec" value="${k}" ${p.precautions.includes(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></fieldset>
+        <div class="field"><label class="label" for="sf-note">그 밖의 주의사항 (선택)</label><input type="text" id="sf-note" maxlength="1000" value="${h(p.precautionNote ?? "")}" placeholder="예: 왼팔 정맥주사, 오후에 피로 심함"></div>
+        <div><button class="btn primary sm" type="submit">안전 정보 저장</button></div>
+      </form></details>
+    ${closed ? `<button class="btn sm" data-act="reactivate">치료 다시 시작</button>`
+      : `<details class="pinfo"><summary class="small">치료 종결</summary>
+      <form id="f-discharge" class="formgrid" style="margin-top:.5rem">
+        <div class="field"><label class="label" for="dc-date">종결일</label><input type="date" id="dc-date" value="${localDate()}" required></div>
+        <div class="field"><label class="label" for="dc-reason">사유</label>${sel("dc-reason", DISCHARGE_REASONS, "", "선택")}</div>
+        <p class="small muted wide">종결한 환자는 목록·대시보드에서 빠지고 기록은 그대로 남습니다. 언제든 다시 시작할 수 있습니다.</p>
+        <div class="wide"><button class="btn sm" type="submit">종결 처리</button></div>
+      </form></details>`}
+    </div>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-act="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`).join("")}</div>
-    ${{ overview: tOverview, schedule: tSchedule, visits: tVisits, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
+    ${{ overview: tOverview, assess: tAssess, schedule: tSchedule, visits: tVisits, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
 }
 
 function newPatientHtml() {
@@ -192,6 +254,7 @@ function newPatientHtml() {
       <div class="field"><label class="label" for="np-name">이름</label><input type="text" id="np-name" required autocomplete="off"></div>
       <div class="field"><label class="label" for="np-birth">생년월일</label><input type="date" id="np-birth" required min="1900-01-01" max="${localDate()}"></div>
       <div class="field"><label class="label" for="np-visit">첫 내원일</label><input type="date" id="np-visit" value="${localDate()}" required></div>
+      <div class="field"><label class="label" for="np-chart">차트번호 (선택)</label><input type="text" id="np-chart" maxlength="40" autocomplete="off" placeholder="병원 차트번호"></div>
       <div class="toolbar wide"><button class="btn primary" type="submit">등록</button>${cache.patients.length ? `<button class="btn ghost" type="button" data-act="t-dashboard">취소</button>` : ""}</div>
     </form></section>`;
 }
@@ -200,11 +263,18 @@ function tOverview(p) {
   const ctx = view.ctx(p.id);
   const al = AI.screen(p, ctx);
   const st = AI.homeStats(ctx.programs, ctx.sessions);
-  const tools = [...new Set(p.scores.map((x) => x.tool))];
+  const tools = [...new Set(p.scores.filter((x) => !isRegional(x.tool)).map((x) => x.tool))];
   const chartTool = tools.includes("K-MBI") ? "K-MBI" : tools[0];
   const series = p.scores.filter((x) => x.tool === chartTool).sort((a, b) => a.date.localeCompare(b.date));
   const next = view.nextAppointment(p.id);
-  const goalRow = (g) => `<li><span class="tag">${g.type}</span><span>${h(g.text)}${g.status !== "active" ? ` <span class="pill ${g.status === "met" ? "ok" : "plain"}">${{ met: "달성", revised: "수정됨", discontinued: "중단" }[g.status]}</span>` : ""}</span>
+  const goalVisits = (g) => ctx.visits.filter((v) => v.goalIds.includes(g.id));
+  const goalLink = (g) => {
+    const vs = goalVisits(g); if (!vs.length) return "";
+    const n = {}; for (const v of vs) for (const it of v.items) n[it.code] = (n[it.code] ?? 0) + 1;
+    const top = Object.entries(n).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => treatment(c)?.label ?? c);
+    return `<div class="small muted">관련 치료 ${vs.length}회 · 최근 ${fmtDate(vs[0].date)}${top.length ? ` · ${h(top.join(", "))}` : ""}</div>`;
+  };
+  const goalRow = (g) => `<li><span class="tag">${g.type}</span><span>${h(g.text)}${g.status !== "active" ? ` <span class="pill ${g.status === "met" ? "ok" : "plain"}">${{ met: "달성", revised: "수정됨", discontinued: "중단" }[g.status]}</span>` : ""}${goalLink(g)}</span>
     <span class="toolbar" style="gap:.3rem;justify-content:end">${g.due ? `<span class="pill ${g.status !== "active" ? "plain" : g.due < localDate() ? "danger" : "plain"}">~${fmtDate(g.due)}</span>` : ""}${g.status === "active" ? `<button class="btn sm" data-act="goal-met" data-id="${g.id}">달성</button>` : ""}</span></li>`;
   return `<div class="grid2">
     <section class="panel"><div class="toolbar" style="justify-content:space-between"><h2>AI 검진 결과</h2><span class="pill info">자동</span></div>
@@ -224,20 +294,79 @@ function tOverview(p) {
     </section>
     <section class="panel chart"><h2>${h(chartTool ?? "평가 점수")} 추이</h2>
       ${series.length ? lineChart(series, { label: `${chartTool} 추이` }) : `<p class="muted small">평가 점수를 입력하면 추이를 그립니다.</p>`}
-      ${tools.length ? `<div class="tablewrap"><table><thead><tr><th>도구</th><th class="num">최근</th><th class="num">이전</th><th>측정일</th></tr></thead><tbody>${AI.latestScores(p.scores).map((x) => `<tr><td>${h(x.tool)}</td><td class="num">${x.value}${x.max ? "/" + x.max : ""}</td><td class="num">${x.prev ?? "–"}</td><td class="mono">${fmtDate(x.date)}</td></tr>`).join("")}</tbody></table></div>` : ""}
-      <details><summary class="small">평가 점수 입력</summary>
-        <form id="f-score" class="formgrid" style="margin-top:.6rem">
-          <div class="field"><label class="label" for="sc-tool">평가 도구</label><input type="text" id="sc-tool" list="tools" required value="K-MBI"><datalist id="tools"><option>K-MBI</option><option>FIM</option><option>K-MMSE</option><option>BBT(Rt)</option><option>BBT(Lt)</option><option>MFT</option><option>FMA-UE</option><option>COPM 수행</option><option>COPM 만족</option></datalist></div>
-          <div class="field"><label class="label" for="sc-value">점수</label><input type="text" id="sc-value" inputmode="decimal" required></div>
-          <div class="field"><label class="label" for="sc-max">만점</label><input type="text" id="sc-max" inputmode="decimal" value="100"></div>
-          <div class="field"><label class="label" for="sc-date">측정일</label><input type="date" id="sc-date" value="${localDate()}" required></div>
-          <div class="wide"><button class="btn primary" type="submit">저장</button></div>
-        </form></details>
+      ${tools.length ? `<div class="tablewrap"><table><thead><tr><th>도구</th><th class="num">최근</th><th class="num">이전</th><th>측정일</th></tr></thead><tbody>${AI.latestScores(p.scores).filter((x) => !isRegional(x.tool)).map((x) => `<tr><td>${h(x.tool)}</td><td class="num">${fmtScore(x)}</td><td class="num">${x.prev ?? "–"}</td><td class="mono">${fmtDate(x.date)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <button class="btn sm" data-act="tab" data-tab="assess">평가 입력 · 항목별 결과</button>
     </section>
     <section class="panel"><h2>최근 7일 가정 운동</h2>
       <div class="bigcount"><div><span class="small muted">수행률</span><strong>${st.adherence ?? "–"}${st.adherence != null ? "%" : ""}</strong></div><div><span class="small muted">완료</span><strong>${st.done}/${st.expected}</strong></div><div><span class="small muted">최대 통증</span><strong>${st.maxPain}/10</strong></div></div>
       ${st.cam.length ? `<p class="small">카메라 측정 어깨 굽힘 최대각: ${st.cam.map((x) => `<span class="mono">${x.maxAngle}°</span>`).join(" → ")}</p>` : `<p class="small muted">카메라 측정 기록 없음</p>`}
     </section>
+  </div>`;
+}
+
+/* ================= 평가 ================= */
+const num = (name, max, step = "1", ph = "") => `<input type="number" name="${name}" min="0" max="${max}" step="${step}" inputmode="decimal" placeholder="${ph}">`;
+
+function assessBody(kind) {
+  switch (kind) {
+    case "kmbi": return `<div class="atable">${KMBI.map(([k, l, max]) => `<label class="arow"><span>${l} <span class="small muted">/${max}</span></span>
+      <select name="kmbi.${k}"><option value="">–</option>${kmbiSteps(max).map((pt, i) => `<option value="${pt}">${KMBI_LEVELS[i]} (${pt}점)</option>`).join("")}</select></label>`).join("")}</div>`;
+    case "mmse": return `<div class="atable">${MMSE.map(([k, l, max]) => `<label class="arow"><span>${l} <span class="small muted">/${max}</span></span>${num(`mmse.${k}`, max)}</label>`).join("")}</div>`;
+    case "copm": return `<p class="small muted">환자가 중요하다고 꼽은 작업 문제를 최대 5개까지 적고, 1~10점으로 매깁니다.</p>
+      <div class="tablewrap"><table class="inputs"><thead><tr><th>작업 문제</th><th class="num">중요도</th><th class="num">수행</th><th class="num">만족</th></tr></thead><tbody>
+      ${[0, 1, 2, 3, 4].map((i) => `<tr><td><input type="text" name="copm.${i}.problem" maxlength="100" placeholder="${i === 0 ? "예: 혼자 옷 입기" : ""}"></td><td>${num(`copm.${i}.imp`, 10)}</td><td>${num(`copm.${i}.perf`, 10)}</td><td>${num(`copm.${i}.sat`, 10)}</td></tr>`).join("")}</tbody></table></div>`;
+    case "grip": return `<p class="small muted">악력계로 3회 측정한 값(kg)을 적으면 평균을 저장합니다. 한쪽만 적어도 됩니다.</p>
+      <div class="tablewrap"><table class="inputs"><thead><tr><th></th><th class="num">1회</th><th class="num">2회</th><th class="num">3회</th></tr></thead><tbody>
+      ${["R", "L"].map((sd) => `<tr><th>${sd === "R" ? "오른손" : "왼손"}</th>${[0, 1, 2].map((i) => `<td>${num(`grip.${sd}.${i}`, 100, "0.1")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    case "mmt": return `<p class="small muted">잰 근육만 고르면 됩니다.</p><div class="tablewrap"><table class="inputs"><thead><tr><th>근육군</th><th>오른쪽</th><th>왼쪽</th></tr></thead><tbody>
+      ${MMT_MUSCLES.map(([k, l]) => `<tr><td>${l}</td>${["R", "L"].map((sd) => `<td><select name="mmt.${k}.${sd}"><option value="">–</option>${MMT_GRADES.map((g) => `<option>${g}</option>`).join("")}</select></td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    case "rom": return `<div class="toolbar"><label class="chk"><input type="radio" name="romtype" value="AROM" checked><span>능동 (AROM)</span></label><label class="chk"><input type="radio" name="romtype" value="PROM"><span>수동 (PROM)</span></label></div>
+      <div class="tablewrap"><table class="inputs"><thead><tr><th>동작</th><th>오른쪽(°)</th><th>왼쪽(°)</th><th class="small muted">참고 정상</th></tr></thead><tbody>
+      ${ROM_MOTIONS.map(([k, l, n]) => `<tr><td>${l}</td>${["R", "L"].map((sd) => `<td>${num(`rom.${k}.${sd}`, 360, "1")}</td>`).join("")}<td class="small muted">0–${n}°</td></tr>`).join("")}</tbody></table></div>`;
+    default: return `<div class="formgrid">
+      <div class="field"><label class="label" for="sc-tool">평가 도구</label><input type="text" id="sc-tool" list="tools" required value="FIM"><datalist id="tools"><option>K-MBI</option><option>FIM</option><option>K-MMSE</option><option>BBT(Rt)</option><option>BBT(Lt)</option><option>MFT</option><option>FMA-UE</option><option>LOTCA</option><option>MVPT</option></datalist></div>
+      <div class="field"><label class="label" for="sc-value">점수</label><input type="text" id="sc-value" inputmode="decimal" required></div>
+      <div class="field"><label class="label" for="sc-max">만점</label><input type="text" id="sc-max" inputmode="decimal" value="126"></div></div>`;
+  }
+}
+
+/** 최근 두 번의 세부 평가 비교 (K-MBI·K-MMSE 항목별) */
+function itemCompare(p, tool, items) {
+  const rows = p.scores.filter((x) => x.tool === tool && x.details?.items).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+  if (!rows.length) return "";
+  const last = rows[rows.length - 1], prev = rows[rows.length - 2];
+  return `<section class="panel"><h2>${tool} 항목별 <span class="small muted">${prev ? `${fmtDate(prev.date)} → ` : ""}${fmtDate(last.date)}</span></h2>
+    <div class="tablewrap"><table><thead><tr><th>항목</th>${prev ? `<th class="num">이전</th>` : ""}<th class="num">최근</th><th class="num">만점</th></tr></thead><tbody>
+    ${items.map(([k, l, max]) => { const a = prev?.details.items[k], b = last.details.items[k]; const diff = a != null && b != null ? b - a : null;
+      return `<tr><td>${l}</td>${prev ? `<td class="num">${a ?? "–"}</td>` : ""}<td class="num">${b ?? "–"}${diff ? ` <span class="small ${diff > 0 ? "up" : "down"}">${diff > 0 ? "▲" : "▼"}${Math.abs(diff)}</span>` : ""}</td><td class="num muted">${max}</td></tr>`; }).join("")}
+    <tr><th>합계</th>${prev ? `<th class="num">${prev.value}</th>` : ""}<th class="num">${last.value}</th><th class="num muted">${last.max ?? ""}</th></tr></tbody></table></div></section>`;
+}
+
+function tAssess(p) {
+  const kind = state.assessKind ?? "kmbi";
+  const regional = AI.latestScores(p.scores).filter((x) => isRegional(x.tool)).sort((a, b) => a.tool.localeCompare(b.tool, "ko"));
+  const copm = p.scores.filter((x) => x.tool === "COPM 수행" && x.details?.problems).sort((a, b) => b.date.localeCompare(a.date))[0];
+  return `<div class="grid2">
+    <form id="f-assess" class="panel visitform">
+      <h2>평가 입력</h2>
+      <div class="formgrid">
+        <div class="field"><label class="label" for="as-kind">평가 종류</label><select id="as-kind">${ASSESS_KINDS.map(([k, l]) => `<option value="${k}" ${k === kind ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="field"><label class="label" for="as-date">측정일</label><input type="date" id="as-date" value="${localDate()}" max="${localDate()}" required></div>
+      </div>
+      ${assessBody(kind)}
+      <div class="toolbar visit-actions"><button class="btn primary" type="submit">평가 저장</button><span class="small" id="as-total"></span></div>
+    </form>
+    <div style="display:grid;gap:1rem;align-content:start">
+      ${itemCompare(p, "K-MBI", KMBI)}
+      ${itemCompare(p, "K-MMSE", MMSE)}
+      ${copm ? `<section class="panel"><h2>COPM <span class="small muted">${fmtDate(copm.date)}</span></h2><div class="tablewrap"><table><thead><tr><th>작업 문제</th><th class="num">중요도</th><th class="num">수행</th><th class="num">만족</th></tr></thead><tbody>
+        ${copm.details.problems.map((x) => `<tr><td>${h(x.problem)}</td><td class="num">${x.imp ?? "–"}</td><td class="num">${x.perf}</td><td class="num">${x.sat}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+      <section class="panel"><h2>부위별 평가 (MMT · ROM · 악력)</h2>
+        ${regional.length ? `<div class="tablewrap"><table><thead><tr><th>부위</th><th class="num">최근</th><th class="num">이전</th><th>측정일</th></tr></thead><tbody>
+        ${regional.map((x) => `<tr><td>${h(x.tool)}</td><td class="num">${fmtScore(x)}</td><td class="num">${x.prev != null ? fmtScore({ ...x, value: x.prev }) : "–"}</td><td class="mono">${fmtDate(x.date)}</td></tr>`).join("")}</tbody></table></div>`
+          : `<p class="muted small">아직 부위별 평가가 없습니다. 왼쪽에서 MMT, ROM, 악력을 입력하세요.</p>`}
+      </section>
+    </div>
   </div>`;
 }
 
@@ -278,7 +407,7 @@ function treatmentRow(t, prev) {
   const fld = (f) => {
     const name = `${t.code}.${f}`, val = prev?.[f] ?? "";
     const label = f === "level" ? levelLabelOf(t) : FIELDS[f].label;
-    const opts = f === "level" ? levelsOf(t) : FIELDS[f].options;
+    const opts = f === "level" ? levelsOf(t) : f === "assist" ? assistOptions() : FIELDS[f].options;
     const input = FIELDS[f].type === "select"
       ? `<select name="${name}"><option value="">–</option>${opts.map(([k, l]) => `<option value="${k}" ${String(val) === k ? "selected" : ""}>${l}</option>`).join("")}</select>`
       : `<input type="number" name="${name}" min="0" max="${FIELDS[f].max}" step="${FIELDS[f].step}" inputmode="decimal" value="${val}">`;
@@ -301,7 +430,7 @@ function favoriteCodes() {
 /** 같은 날 함께 기록할 수 있는 다른 환자 (그 날 일정이 있는 환자 먼저) */
 function groupCandidates(p, date) {
   const hasAppt = (x) => cache.appointments.some((a) => a.patientId === x.id && a.date === date && a.status !== "cancelled");
-  return cache.patients.filter((x) => x.id !== p.id).sort((a, b) => hasAppt(b) - hasAppt(a) || a.name.localeCompare(b.name, "ko")).map((x) => ({ ...x, today: hasAppt(x) }));
+  return view.active().filter((x) => x.id !== p.id).sort((a, b) => hasAppt(b) - hasAppt(a) || a.name.localeCompare(b.name, "ko")).map((x) => ({ ...x, today: hasAppt(x) }));
 }
 
 function visitForm(p) {
@@ -315,10 +444,16 @@ function visitForm(p) {
   const last = view.visits(p.id)[0];
   const favs = favoriteCodes();
   const mates = editing ? [] : groupCandidates(p, date);
+  const packs = cache.profile.prefs?.packs ?? DEFAULT_PACKS;
+  // 설정한 분야의 그룹 + 불러온 기록에 들어 있는 그룹은 항상 보인다
+  const groups = GROUPS.filter(([g, , pk]) => packs.includes(pk) || TREATMENTS.some((t) => t.group === g && byCode[t.code]));
+  const goals = p.goals.filter((g) => g.status === "active" || prefill?.goalIds.includes(g.id));
+  const tags = safetyTags(p);
   return `<form id="f-visit" class="panel visitform">
     <div class="toolbar" style="justify-content:space-between"><h2>${editing ? `${fmtDate(editing.date)} 내원기록 수정` : "내원기록 작성"}</h2>
       ${editing ? `<button type="button" class="btn sm ghost" data-act="visit-cancel-edit">수정 취소</button>`
         : last ? `<button type="button" class="btn sm ghost" data-act="visit-copy" data-id="${last.id}">지난 기록(${fmtDate(last.date)}) 불러오기</button>` : ""}</div>
+    ${tags.length ? `<div class="safety-bar"><b>⚠ 안전 주의</b>${tags.map((t) => `<span class="pill safety">${h(t)}</span>`).join("")}${p.precautionNote ? `<span class="small">${h(p.precautionNote)}</span>` : ""}</div>` : ""}
     ${prefill && !editing ? `<p class="small muted">${fmtDate(prefill.date)} 기록의 치료 항목과 값을 불러왔습니다. 오늘 한 대로 고쳐 저장하세요. <button type="button" class="linklike" data-act="visit-clear">비우기</button></p>` : ""}
     <div class="formgrid">
       <div class="field"><label class="label" for="vs-date">내원일</label><input type="date" id="vs-date" value="${date}" max="${localDate()}" required></div>
@@ -331,9 +466,12 @@ function visitForm(p) {
         ${favs.length ? `<div class="favs"><span class="small muted">자주 쓰는 치료</span>${favs.map((c) => `<button type="button" class="chip" data-act="vi-fav" data-code="${c}" aria-pressed="${Boolean(byCode[c])}">${h(treatment(c).label)}</button>`).join("")}</div>` : ""}
       </div>
       <p class="small muted">체크하면 무게·세트·횟수·도움 수준 같은 세부 칸이 열립니다.</p>
-      ${GROUPS.map(([g, label]) => `<div class="vcat"><h3>${label}</h3>${TREATMENTS.filter((t) => t.group === g).map((t) => treatmentRow(t, byCode[t.code])).join("")}</div>`).join("")}
+      ${groups.map(([g, label]) => `<div class="vcat"><h3>${label}</h3>${TREATMENTS.filter((t) => t.group === g).map((t) => treatmentRow(t, byCode[t.code])).join("")}</div>`).join("")}
+      <p class="small muted">다른 분야(소아, 치매·노인, 정신건강, 손 재활, 지역사회) 치료는 <button type="button" class="linklike" data-act="t-settings">설정</button>에서 추가할 수 있습니다.</p>
       <p class="small muted vi-empty" hidden>검색한 치료가 없습니다. 메모 칸에 적어 주세요.</p>
     </fieldset>
+    ${goals.length ? `<fieldset class="vgroup"><legend>관련 목표 <span class="small muted">이번 치료가 어느 목표를 위한 것인지</span></legend>
+      <div class="goalpick">${goals.map((g) => `<label class="chk"><input type="checkbox" name="goal" value="${g.id}" ${prefill?.goalIds.includes(g.id) ? "checked" : ""}><span><span class="tag">${g.type}</span> ${h(g.text)}</span></label>`).join("")}</div></fieldset>` : ""}
     <fieldset class="vgroup"><legend>관찰·특이사항</legend>
       <div class="chkgrid">${OBSERVATIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" name="obs" value="${k}" ${prefill?.observations.includes(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>
     </fieldset>
@@ -373,6 +511,7 @@ function tVisits(p) {
         <div class="toolbar" style="justify-content:space-between"><strong class="mono">${h(v.date)}</strong>
           <span class="toolbar" style="gap:.3rem">${v.duration ? `<span class="pill plain">${v.duration}분</span>` : ""}${appt(v.appointmentId) ? `<span class="pill plain">${KIND[appt(v.appointmentId).kind]}</span>` : ""}${v.groupId ? `<span class="pill info">그룹 ${cache.visits.filter((x) => x.groupId === v.groupId).length}명</span>` : ""}<button class="btn sm ghost" data-act="edit-visit" data-id="${v.id}">수정</button><button class="btn sm ghost" data-act="del-visit" data-id="${v.id}">삭제</button></span></div>
         <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it))}</li>`).join("")}</ul>
+        ${v.goalIds.length ? `<div class="small muted">목표: ${v.goalIds.map((id) => p.goals.find((g) => g.id === id)).filter(Boolean).map((g) => `<span class="tag">${g.type}</span> ${h(g.text.slice(0, 30))}${g.text.length > 30 ? "…" : ""}`).join(" · ")}</div>` : ""}
         ${v.observations.length ? `<div class="flags">${v.observations.map((k) => `<span class="pill ${["fall_risk", "dizzy", "skin", "pain", "early_stop"].includes(k) ? "warn" : "plain"}">${h(observation(k))}</span>`).join("")}</div>` : ""}
         ${v.note ? `<p class="small">${h(v.note)}</p>` : ""}
       </article>`).join("") : `<p class="muted small">아직 내원기록이 없습니다. 위에서 오늘 한 치료를 체크해 저장하세요.</p>`}

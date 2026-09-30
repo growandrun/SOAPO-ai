@@ -12,6 +12,9 @@ export const state = {
   visitAppt: null, visitPrefill: null, visitEdit: null,   // 내원기록: 연결할 일정, 불러온 지난 기록, 수정 중인 기록
   draftSavedAt: null,      // SOAP 임시 저장 시각
   weekOffset: 0,           // 주간 시간표: 이번 주 기준 몇 주 앞/뒤
+  showDischarged: false,   // 왼쪽 목록에 종결 환자도 보기
+  safetyOpen: false,       // 안전 정보 입력 칸 펼침
+  assessKind: "kmbi",      // 평가 입력 양식 종류
   // 환자
   ptab: "home", editSymptom: false,
 };

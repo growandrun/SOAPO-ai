@@ -10,6 +10,7 @@ import { state, intent } from "./state.js";
 import { landingHtml, authHtml, onboardHtml, setupHtml, errorHtml, resetHtml } from "./landing.js";
 import { therapistHtml, railHtml, updateChecks, threadHtml, openDraft, compareNote } from "./therapist.js";
 import { patientHtml, MOOD, SLEEP } from "./patient.js";
+import { KMBI, MMSE, MMT_MUSCLES, ROM_MOTIONS, SIDE_TAG, gradeToNum } from "./assessments.js";
 
 const { cache, view } = D;
 const app = document.getElementById("app");
@@ -131,6 +132,64 @@ function fillAIDraft(p) {
   return empty;
 }
 
+/* ---------- 평가 입력: 합계 미리 보기, 저장할 행 만들기 ---------- */
+const round1 = (x) => Math.round(x * 10) / 10;
+const mean = (a) => a.reduce((t, x) => t + x, 0) / a.length;
+function fieldNum(f, name) { const x = f.elements[name]?.value?.trim(); return x ? Number(x) : null; }
+function copmRows(f) {
+  return [0, 1, 2, 3, 4].map((i) => ({ problem: f.elements[`copm.${i}.problem`].value.trim(), imp: fieldNum(f, `copm.${i}.imp`), perf: fieldNum(f, `copm.${i}.perf`), sat: fieldNum(f, `copm.${i}.sat`) }))
+    .filter((x) => x.problem && x.perf != null && x.sat != null);
+}
+function assessTotal() {
+  const f = document.getElementById("f-assess"), out = document.getElementById("as-total"); if (!f || !out) return;
+  const kind = f.querySelector("#as-kind").value;
+  const sumOf = (items, pre) => { const vals = items.map(([k]) => fieldNum(f, `${pre}.${k}`)).filter((x) => x != null); return [vals.reduce((t, x) => t + x, 0), vals.length]; };
+  if (kind === "kmbi") { const [t, n] = sumOf(KMBI, "kmbi"); out.textContent = `합계 ${t}/100 · ${n}/${KMBI.length}항목`; }
+  else if (kind === "mmse") { const [t, n] = sumOf(MMSE, "mmse"); out.textContent = `합계 ${t}/30 · ${n}/${MMSE.length}항목`; }
+  else if (kind === "copm") { const r = copmRows(f); out.textContent = r.length ? `수행 평균 ${round1(mean(r.map((x) => x.perf)))} · 만족 평균 ${round1(mean(r.map((x) => x.sat)))} (${r.length}개 문제)` : ""; }
+  else out.textContent = "";
+}
+/** 평가 양식 → 저장할 행 목록. 문제가 있으면 오류 문장을 던진다 */
+function assessRows(f) {
+  const kind = f.querySelector("#as-kind").value, date = f.querySelector("#as-date").value || localDate();
+  const fail = (m) => { throw new Error(m); };
+  const itemized = (items, pre, tool, max) => {
+    const out = {};
+    for (const [k, label, m] of items) { const x = fieldNum(f, `${pre}.${k}`); if (x == null) fail(`${tool}의 "${label}" 항목을 입력해 주세요.`); if (x < 0 || x > m) fail(`"${label}"은 0~${m}점입니다.`); out[k] = x; }
+    return [{ tool, value: Object.values(out).reduce((t, x) => t + x, 0), max, date, details: { items: out } }];
+  };
+  switch (kind) {
+    case "kmbi": return itemized(KMBI, "kmbi", "K-MBI", 100);
+    case "mmse": return itemized(MMSE, "mmse", "K-MMSE", 30);
+    case "copm": {
+      const r = copmRows(f); if (!r.length) fail("작업 문제와 수행·만족 점수를 하나 이상 적어 주세요.");
+      if (r.some((x) => [x.imp, x.perf, x.sat].some((v) => v != null && (v < 1 || v > 10)))) fail("COPM 점수는 1~10점입니다.");
+      const details = { problems: r };
+      return [{ tool: "COPM 수행", value: round1(mean(r.map((x) => x.perf))), max: 10, date, details }, { tool: "COPM 만족", value: round1(mean(r.map((x) => x.sat))), max: 10, date, details }];
+    }
+    case "grip": return ["R", "L"].flatMap((sd) => {
+      const trials = [0, 1, 2].map((i) => fieldNum(f, `grip.${sd}.${i}`)).filter((x) => x != null);
+      return trials.length ? [{ tool: `악력(${SIDE_TAG[sd]})`, value: round1(mean(trials)), max: null, date, details: { trials } }] : [];
+    });
+    case "mmt": return MMT_MUSCLES.flatMap(([k, l]) => ["R", "L"].flatMap((sd) => {
+      const g = f.elements[`mmt.${k}.${sd}`].value;
+      return g ? [{ tool: `MMT ${l}(${SIDE_TAG[sd]})`, value: gradeToNum(g), max: 5, date }] : [];
+    }));
+    case "rom": {
+      const type = f.querySelector("input[name=romtype]:checked").value;
+      return ROM_MOTIONS.flatMap(([k, l, n]) => ["R", "L"].flatMap((sd) => {
+        const x = fieldNum(f, `rom.${k}.${sd}`);
+        return x != null ? [{ tool: `${type} ${l}(${SIDE_TAG[sd]})`, value: x, max: n, date }] : [];
+      }));
+    }
+    default: {
+      const value = parseFloat(f.querySelector("#sc-value").value), max = f.querySelector("#sc-max").value ? parseFloat(f.querySelector("#sc-max").value) : null;
+      if (Number.isNaN(value)) fail("점수는 숫자로 입력해 주세요.");
+      return [{ tool: f.querySelector("#sc-tool").value.trim(), value, max, date }];
+    }
+  }
+}
+
 /* ---------- 내원기록 폼: 검색·자주 쓰는 치료·선택 수 ---------- */
 function syncVisitForm() {
   const f = document.getElementById("f-visit"); if (!f) return;
@@ -192,6 +251,11 @@ document.addEventListener("click", async (e) => {
       /* 치료사 */
       case "t-dashboard": Object.assign(state, { tView: "dashboard", selected: null }); return render();
       case "new-patient": state.tView = "new"; return render();
+      case "t-settings": Object.assign(state, { tView: "settings", selected: null }); window.scrollTo({ top: 0 }); return render();
+      case "toggle-discharged": state.showDischarged = !state.showDischarged; return render();
+      case "reactivate":
+        await run(b, () => D.updatePatient(p.id, { status: "active", dischargedOn: null, dischargeReason: null }));
+        toast("치료를 다시 시작했습니다"); return render();
       case "pick":
         if (state.selected !== b.dataset.id) { saveDraftNow().catch(() => {}); Object.assign(state, { draft: null, tab: "overview", visitAppt: null, visitPrefill: null, visitEdit: null }); }
         Object.assign(state, { tView: "patient", selected: b.dataset.id });
@@ -299,15 +363,25 @@ document.addEventListener("input", (e) => {
   if (t.id === "soap-date" && state.draft) { state.draft.date = t.value || localDate(); scheduleAutosave(); }
   if (t.id === "soap-reason" && state.draft) state.draft.reason = t.value;
   if (t.id === "vi-search") filterTreatments(t.value);
+  if (t.closest?.("#f-assess")) assessTotal();
+  if (t.id === "rail-search") {
+    const q = t.value.trim().toLowerCase(); let n = 0;
+    document.querySelectorAll(".plist .pitem").forEach((el) => { const ok = !q || el.dataset.search.includes(q); el.hidden = !ok; if (ok) n++; });
+    const empty = document.querySelector(".rail-empty"); if (empty) empty.hidden = n > 0;
+  }
   if (t.type === "range") {
     const out = document.querySelector(`[data-out="${t.id}"]`);
     if (out) out.textContent = t.dataset.names ? t.dataset.names.split("|")[t.value] : t.value;
   }
 });
 
-document.addEventListener("change", (e) => { if (e.target.matches?.("#f-visit .vi-on")) syncVisitForm(); });
-// 검색 칸에서 Enter를 눌러도 내원기록이 저장되지 않게
-document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "vi-search") e.preventDefault(); });
+document.addEventListener("change", (e) => {
+  if (e.target.matches?.("#f-visit .vi-on")) syncVisitForm();
+  if (e.target.id === "as-kind") { state.assessKind = e.target.value; render(); }
+  if (e.target.closest?.("#f-assess")) assessTotal();
+});
+// 검색 칸에서 Enter를 눌러도 양식이 저장되지 않게
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && ["vi-search", "rail-search"].includes(e.target.id)) e.preventDefault(); });
 // 탭을 닫거나 새로고침하기 전에 SOAP 초안 저장 시도
 window.addEventListener("pagehide", () => { saveDraftNow(state.draft, { quiet: true }).catch(() => {}); });
 
@@ -369,13 +443,39 @@ document.addEventListener("submit", async (e) => {
         return;
       }
       case "f-patient": {
-        const np = await run(btn, () => D.createPatient({ name: v("np-name"), birthDate: v("np-birth"), firstVisit: v("np-visit") }));
+        const np = await run(btn, () => D.createPatient({ name: v("np-name"), birthDate: v("np-birth"), firstVisit: v("np-visit"), chartNo: v("np-chart") }));
         Object.assign(state, { selected: np.id, tView: "patient", tab: "overview" });
         toast(`등록했습니다. 초대 코드: ${np.invite}`); return render();
       }
       case "f-pinfo": {
-        await run(btn, () => D.updatePatient(p.id, { name: v("pi-name"), birthDate: v("pi-birth"), firstVisit: v("pi-visit") }));
+        await run(btn, () => D.updatePatient(p.id, { name: v("pi-name"), birthDate: v("pi-birth"), firstVisit: v("pi-visit"), chartNo: v("pi-chart") }));
         toast("기본 정보를 저장했습니다"); return render();
+      }
+      case "f-safety": {
+        const body = { diagnosis: v("sf-dx"), onset: v("sf-onset"), weightBearing: v("sf-wb"), dietFood: v("sf-food"), dietDrink: v("sf-drink"), precautionNote: v("sf-note"),
+          precautions: [...f.querySelectorAll("input[name=prec]:checked")].map((c) => c.value) };
+        if (v("sf-side")) body.affectedSide = v("sf-side");   // 마비측은 비워 둘 수 없는 칸이라 고른 경우에만 바꾼다
+        await run(btn, () => D.updatePatient(p.id, body));
+        state.safetyOpen = false; toast("안전 정보를 저장했습니다"); return render();
+      }
+      case "f-discharge": {
+        if (!v("dc-reason")) return toast("종결 사유를 골라 주세요", "error");
+        await run(btn, () => D.updatePatient(p.id, { status: "discharged", dischargedOn: v("dc-date"), dischargeReason: v("dc-reason") }));
+        toast("치료를 종결했습니다. 왼쪽 목록 아래 '종결 환자 보기'에서 다시 찾을 수 있습니다"); return render();
+      }
+      case "f-settings": {
+        const packs = [...f.querySelectorAll("input[name=pack]:checked")].map((c) => c.value);
+        if (!packs.length) return toast("치료 분야를 하나 이상 골라 주세요", "error");
+        const assistScale = f.querySelector("input[name=scale]:checked")?.value ?? "ot";
+        await run(btn, () => D.savePrefs({ ...(cache.profile.prefs ?? {}), assistScale, packs }));
+        toast("설정을 저장했습니다"); return render();
+      }
+      case "f-assess": {
+        let rows;
+        try { rows = assessRows(f); } catch (err) { return toast(err.message, "error"); }
+        if (!rows.length) return toast("입력한 값이 없습니다", "error");
+        const n = await run(btn, () => D.addScores(p.id, rows));
+        toast(`평가를 저장했습니다 (${n}건)`); return render();
       }
       case "f-appt": {
         const startsAt = new Date(`${v("ap-date")}T${v("ap-time")}`);
@@ -409,14 +509,15 @@ document.addEventListener("submit", async (e) => {
         const date = v("vs-date") || localDate();
         const base = { date, duration: num("vs-dur") || null, items, observations, note };
         if (state.visitEdit) {
-          await run(btn, () => D.updateVisit(state.visitEdit, { ...base, appointmentId: v("vs-appt") }));
+          await run(btn, () => D.updateVisit(state.visitEdit, { ...base, goalIds: [...f.querySelectorAll("input[name=goal]:checked")].map((c) => c.value), appointmentId: v("vs-appt") }));
           state.visitEdit = null; window.scrollTo({ top: 0 });
           toast("내원기록을 수정했습니다"); return render();
         }
         // 그룹 치료: 함께 고른 환자는 그 날 아직 기록 없는 일정에 연결
         const freeAppt = (pid) => cache.appointments.find((a) => a.patientId === pid && a.date === date && a.status !== "cancelled" && !cache.visits.some((x) => x.appointmentId === a.id))?.id ?? null;
         const mates = [...f.querySelectorAll("input[name=mate]:checked")].map((c) => c.value);
-        const list = [{ ...base, patientId: p.id, appointmentId: v("vs-appt") }, ...mates.map((pid) => ({ ...base, patientId: pid, appointmentId: freeAppt(pid) }))];
+        const goalIds = [...f.querySelectorAll("input[name=goal]:checked")].map((c) => c.value);
+        const list = [{ ...base, goalIds, patientId: p.id, appointmentId: v("vs-appt") }, ...mates.map((pid) => ({ ...base, patientId: pid, appointmentId: freeAppt(pid) }))];
         await run(btn, () => D.addVisits(list));
         Object.assign(state, { visitAppt: null, visitPrefill: null });
         window.scrollTo({ top: 0 });
@@ -432,12 +533,6 @@ document.addEventListener("submit", async (e) => {
       case "f-goal": {
         await run(btn, () => D.addGoal(p.id, { type: v("g-type"), text: v("g-text"), due: v("g-due") }));
         toast("목표를 추가했습니다"); return render();
-      }
-      case "f-score": {
-        const value = parseFloat(v("sc-value")), max = v("sc-max") ? parseFloat(v("sc-max")) : null;
-        if (Number.isNaN(value)) return toast("점수는 숫자로 입력해 주세요", "error");
-        await run(btn, () => D.addScore(p.id, { tool: v("sc-tool"), value, max, date: v("sc-date") }));
-        toast("점수를 저장했습니다"); return render();
       }
       case "f-prog": {
         await run(btn, () => D.addProgram(p.id, { title: v("pg-title"), detail: v("pg-detail"), target: parseInt(v("pg-target")) || 10, perDay: parseInt(v("pg-perday")) || 1, camera: v("pg-camera") || null, targetAngle: parseInt(v("pg-angle")) || 90 }));

@@ -25,7 +25,7 @@ export function checkNote(note, prev) {
     if (!/\d/.test(o)) add("O", "danger", "O에 숫자(점수, 각도, 횟수, 시간)가 없습니다.");
     const v = VAGUE.filter((w) => o.includes(w));
     if (v.length) add("O", "warn", `O에 측정할 수 없는 표현이 있습니다: ${v.map((x) => `“${x}”`).join(", ")}. 수치나 도움 수준으로 바꿔 주세요.`);
-    if (!ASSIST.some(([k, ko]) => new RegExp(`(^|[^A-Za-z-])${k}([^A-Za-z]|$)`).test(o) || o.includes(ko))) add("O", "warn", "도움 수준(I, Mod I, S, Min A, Mod A, Max A, Dep)이 표시되지 않았습니다.");
+    if (!/FIM\s*[1-7]/.test(o) && !ASSIST.some(([k, ko]) => new RegExp(`(^|[^A-Za-z-])${k}([^A-Za-z]|$)`).test(o) || o.includes(ko))) add("O", "warn", "도움 수준(I, Mod I, S, Min A, Mod A, Max A, Dep 또는 FIM 1~7)이 표시되지 않았습니다.");
   }
   if (!a.trim()) add("A", "danger", "A가 비어 있습니다. S와 O를 근거로 해석을 적어 주세요.");
   else {
@@ -117,7 +117,8 @@ export function draftNote(patient, { programs, sessions, messages, symptoms = []
   const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
   const msgs = messages.filter((m) => m.from === "patient" && m.at >= weekAgo);
   const scores = latestScores(patient.scores);
-  const stg = patient.goals.find((g) => g.type === "STG" && g.status === "active");
+  // 내원기록에 연결한 목표가 있으면 그 목표, 없으면 진행 중인 첫 STG
+  const stg = patient.goals.find((g) => visit?.goalIds?.includes(g.id) && g.status === "active") ?? patient.goals.find((g) => g.type === "STG" && g.status === "active");
   const s = [
     ...msgs.map((m) => `환자(메시지 ${fmtDate(m.at)}): "${m.text}"`),
     ...st.painNotes.map((x) => `가정 훈련 기록: ${x}`),
@@ -138,7 +139,7 @@ export function draftNote(patient, { programs, sessions, messages, symptoms = []
   const k = scores.find((x) => x.tool === "K-MBI");
   const a = [
     k && k.prev != null ? `K-MBI ${k.value - k.prev >= 0 ? k.value - k.prev + "점 향상" : Math.abs(k.value - k.prev) + "점 저하"}.` : "",
-    stg ? `STG(“${stg.text.slice(0, 28)}…”)에 대해 [진전 양호 / 정체 / 저하].` : "",
+    stg ? `${stg.type}(“${stg.text.slice(0, 28)}…”)에 대해 [진전 양호 / 정체 / 저하].` : "",
     st.maxPain >= 5 ? "가정 훈련 중 통증 보고가 있어 운동 강도 조정 필요 여부 확인 필요." : "",
     "[문제의 원인과 재활 잠재력을 적어 주세요]",
   ].filter(Boolean).join(" ");

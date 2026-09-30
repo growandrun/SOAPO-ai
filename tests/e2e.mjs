@@ -60,10 +60,24 @@ if (!/1958\.03\.12 · 만 \d+세/.test(await text(T, '.rail'))) throw new Error(
 await T.click('.pinfo summary'); await T.fill('#pi-birth', '1958-03-13'); await T.click('#f-pinfo button[type=submit]'); await T.waitForFunction(() => document.querySelector('.rail').textContent.includes('1958.03.13')); const invite = (await T.textContent('.phead b.mono')).trim(); step(`환자 등록, 초대 코드 ${invite}`);
 await T.click('details:has(#f-goal) summary'); await T.fill('#g-text', '변형 숟가락을 사용하여 식사를 2주 이내에 수정된 독립(Mod I) 수준으로 수행한다.'); await T.fill('#g-due', localDate); await T.click('#f-goal button[type=submit]');
 await T.waitForSelector('.goals li');
-for (const [v, d] of [['48', '2026-09-16'], ['55', '2026-09-23']]) { await T.click('details:has(#f-score) summary'); await T.fill('#sc-value', v); await T.fill('#sc-date', d); await T.click('#f-score button[type=submit]'); await T.waitForTimeout(400); }
+await T.click('[data-tab=assess]'); await T.selectOption('#as-kind', 'simple'); await T.waitForSelector('#sc-value');
+for (const [v, d] of [['48', '2026-09-16'], ['55', '2026-09-23']]) { await T.fill('#sc-tool', 'K-MBI'); await T.fill('#sc-value', v); await T.fill('#sc-max', '100'); await T.fill('#as-date', d); await T.click('#f-assess button[type=submit]'); await T.waitForTimeout(400); }
 await T.click('[data-tab=home]'); await T.fill('#pg-title', '어깨 앞으로 들어올리기'); await T.fill('#pg-detail', '천천히 들어 올렸다 내립니다'); await T.fill('#pg-target', '5'); await T.selectOption('#pg-camera', 'shoulder_flexion'); await T.click('#f-prog button[type=submit]');
 await T.waitForTimeout(400); await T.fill('#pg-title', '콩 옮기기'); await T.fill('#pg-detail', '콩 20개를 옮깁니다'); await T.selectOption('#pg-camera', ''); await T.click('#f-prog button[type=submit]');
 await T.waitForFunction(() => document.querySelectorAll('.task').length === 2); step('목표·점수·가정 운동 입력');
+// 세부 평가: K-MBI 항목별(모두 4단계 → 80점), ROM, MMT
+await T.click('[data-tab=assess]'); await T.selectOption('#as-kind', 'kmbi'); await T.waitForSelector('select[name="kmbi.feeding"]');
+for (const sel of await T.locator('#f-assess select[name^="kmbi."]').all()) await sel.selectOption({ index: 4 });
+if (!(await text(T, '#as-total')).includes('합계 80/100')) throw new Error('K-MBI 합계 미리 보기가 틀림');
+await T.click('#f-assess button[type=submit]'); await T.waitForSelector('h2:has-text("K-MBI 항목별")');
+await T.selectOption('#as-kind', 'rom'); await T.fill('input[name="rom.sh_flex.R"]', '120'); await T.click('#f-assess button[type=submit]'); await T.waitForSelector('td:has-text("AROM 어깨 굽힘(Rt)")');
+await T.selectOption('#as-kind', 'mmt'); await T.selectOption('select[name="mmt.sh_flex.R"]', '3+'); await T.click('#f-assess button[type=submit]'); await T.waitForSelector('td:has-text("MMT 어깨 굽힘(Rt)")');
+{ const at = await text(T, '.main'); for (const want of ['120°', '3+', '식사']) if (!at.includes(want)) throw new Error(`평가 결과에 "${want}" 없음`); }
+await shot(T, '9-therapist-assess'); step('세부 평가: K-MBI 항목별 합계·ROM·MMT 부위별');
+await T.click('details:has(#f-safety) summary'); await T.check('input[name=prec][value=fall]'); await T.check('input[name=prec][value=dysphagia]'); await T.selectOption('#sf-wb', 'PWB'); await T.click('#f-safety button[type=submit]');
+await T.waitForFunction(() => document.querySelector('.safety-bar')?.textContent.includes('연하곤란'));
+if (!(await text(T, '.rail')).includes('안전 3')) throw new Error('목록에 안전 표시 없음');
+step('안전 정보 (주의사항·체중부하) → 상단·목록 표시');
 await T.click('[data-tab=schedule]'); await T.fill('#ap-date', localDate); await T.fill('#ap-time', '23:50'); await T.selectOption('#ap-kind', 'reevaluation'); await T.fill('#ap-note', 'K-MBI 재평가'); await T.click('#f-appt button[type=submit]');
 await T.waitForSelector('.appts .appt'); step('치료 일정(재평가) 추가');
 // 반복 일정: 오늘이 아닌 두 요일, 2주 → 4건
@@ -91,6 +105,10 @@ await P.waitForSelector('.toast.error'); step('틀린 초대 코드 거부');
 await P.fill('#ob-invite', invite.toLowerCase()); await P.click('#f-onboard button[type=submit]');
 await P.waitForSelector('.pcards'); console.log('  환자 홈:', (await text(P, '.hello')).slice(0, 80), '|', (await text(P, '.pcards')).slice(0, 120));
 if (!(await text(P, '.hello')).includes('보호자님')) throw new Error('보호자 인사말 없음');
+// '운동하러 가기' 버튼이 카드 밖으로 넘치지 않는지 (휴대폰·데스크톱)
+const goFits = () => P.evaluate(() => { const b = document.querySelector('.pcard-go'); if (!b) return false; const r = b.getBoundingClientRect(), c = b.closest('.pcard').getBoundingClientRect(); return r.left >= c.left - 0.5 && r.right <= c.right + 0.5; });
+for (const width of [390, 1280, 1000]) { await P.setViewportSize({ width, height: 844 }); if (!(await goFits())) throw new Error(`'운동하러 가기' 버튼이 카드 밖으로 넘침 (폭 ${width})`); }
+await P.setViewportSize({ width: 390, height: 844 });
 step('보호자 가입 → 환자 홈 대시보드 (다음 치료·오늘 운동·꾸준함)');
 await P.$eval('#sy-pain', (el) => { el.value = 7; el.dispatchEvent(new Event('input', { bubbles: true })); });
 await P.fill('#sy-note', '어깨가 아침에 뻣뻣해요'); await P.click('#f-symptom button[type=submit]');
@@ -120,13 +138,15 @@ await T.click('[data-act=t-dashboard]'); await T.click('.appt [data-act=write-vi
 await T.fill('#vi-search', '덤벨');
 if (!(await T.isHidden('.vi[data-code=eating]')) || !(await T.isVisible('.vi[data-code=dumbbell]'))) throw new Error('치료 검색이 걸러내지 않음');
 await T.fill('#vi-search', ''); step('치료 체크리스트 검색');
+if (!(await T.isVisible('#f-visit .safety-bar'))) throw new Error('내원기록에 안전 정보가 안 보임');
+await T.check('input[name=goal]');
 await T.check('input[name=t][value=dumbbell]'); await T.selectOption('select[name="dumbbell.side"]', 'R'); await T.fill('input[name="dumbbell.weight"]', '2'); await T.fill('input[name="dumbbell.sets"]', '3'); await T.fill('input[name="dumbbell.reps"]', '10'); await T.fill('input[name="dumbbell.how"]', '팔꿈치 90도 유지');
 await T.check('input[name=t][value=eating]'); await T.selectOption('select[name="eating.assist"]', 'MinA'); await T.fill('input[name="eating.minutes"]', '15');
 await T.check('input[name=obs][value=guardian]'); await T.check('input[name=obs][value=fall_risk]');
 await shot(T, '7-therapist-visit-form');
 await T.click('#f-visit [data-next=stay]'); await T.waitForSelector('.visit');
 const vt = await text(T, '.main');
-for (const want of ['2kg × 3세트 × 10회', '최소 도움 (Min A)', '낙상 위험 관찰', '치료별 변화']) if (!vt.includes(want)) throw new Error(`내원기록에 "${want}" 없음`);
+for (const want of ['2kg × 3세트 × 10회', '최소 도움 (Min A)', '낙상 위험 관찰', '치료별 변화', '목표: STG']) if (!vt.includes(want)) throw new Error(`내원기록에 "${want}" 없음`);
 step('내원기록: 치료 체크리스트 + 측면·무게·세트·횟수·도움 수준 저장');
 await T.click('[data-act=visit-copy]'); await T.waitForFunction(() => document.querySelector('input[name="dumbbell.weight"]')?.value === '2' && document.querySelector('input[name=t][value=dumbbell]').checked);
 await shot(T, '8-therapist-visits'); step('지난 내원기록 불러오기');
@@ -152,11 +172,27 @@ await T.fill('#soap-a', 'Rt 쥐기 지구력 저하로 식기 조작 제한. K-M
 await T.click('[data-act=sign]'); await T.waitForSelector('.amend');
 if (!(await text(T, '.note')).includes('K-MBI 이전 점수 오기 수정')) throw new Error('정정 사유가 이력에 없음');
 step('서명한 SOAP에 정정 기록 추가 (원본 보존 + 사유)');
-await T.click('[data-act=new-patient]'); await T.fill('#np-name', '김그룹'); await T.fill('#np-birth', '1950-05-05'); await T.click('#f-patient button[type=submit]'); await T.waitForSelector('.phead');
+await T.click('[data-tab=overview]'); if (!(await text(T, '.goals')).includes('관련 치료')) throw new Error('목표에 관련 치료 표시 없음');
+step('내원기록 ↔ 목표 연결 (목표별 관련 치료 횟수)');
+await T.click('[data-act=new-patient]'); await T.fill('#np-name', '김그룹'); await T.fill('#np-birth', '1950-05-05'); await T.fill('#np-chart', 'G-7'); await T.click('#f-patient button[type=submit]'); await T.waitForSelector('.phead');
+await T.fill('#rail-search', 'g-7');
+if ((await T.locator('.plist .pitem:visible').count()) !== 1 || !(await text(T, '.plist .pitem:visible')).includes('김그룹')) throw new Error('차트번호 검색 실패');
+await T.fill('#rail-search', ''); step('차트번호 등록 · 환자 검색');
 await T.click('.rail [data-act=pick]'); await T.click('[data-tab=visits]'); await T.check('input[name=t][value=putty]');
 await T.click('details.mates summary'); await T.check('input[name=mate]'); await T.click('#f-visit [data-next=soap]'); await T.waitForSelector('#soap-s');
 if (!(await T.inputValue('#soap-o')).includes('치료용 퍼티')) throw new Error('저장하고 SOAP 쓰기: O에 방금 기록 없음');
 await T.click('[data-tab=visits]'); await T.waitForSelector('text=그룹 2명'); step('그룹 치료 (2명 동시 저장) → 저장하고 바로 SOAP 초안');
+await T.click('[data-act=t-settings]'); await T.check('input[name=scale][value=fim]'); await T.check('input[name=pack][value=peds]'); await T.click('#f-settings button[type=submit]');
+await T.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('설정을 저장')));
+await T.click('.rail [data-act=pick]'); await T.click('[data-tab=visits]');
+if (!(await text(T, '#f-visit')).includes('소아 발달')) throw new Error('설정한 치료 분야(소아)가 안 보임');
+if (!(await T.locator('select[name="eating.assist"] option', { hasText: 'FIM 4' }).count())) throw new Error('FIM 표기가 적용되지 않음');
+step('설정: 도움 수준 FIM 표기 · 치료 분야 추가(소아)');
+await T.click('.rail [data-act=pick] >> nth=1'); await T.click('details:has(#f-discharge) summary'); await T.selectOption('#dc-reason', 'goal_met'); await T.click('#f-discharge button[type=submit]');
+await T.waitForSelector('[data-act=reactivate]');
+if ((await text(T, '.plist')).includes('김그룹')) throw new Error('종결 환자가 목록에 남아 있음');
+await T.click('[data-act=toggle-discharged]'); await T.waitForFunction(() => document.querySelector('.plist').textContent.includes('김그룹'));
+step('치료 종결 → 목록에서 빠짐 · 종결 환자 보기');
 
 await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.papp'); await P.click('[data-tab=records]'); await P.waitForSelector('.plain-summary');
 if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환자 기록에 치료사 평가 없음');

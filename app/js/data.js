@@ -3,6 +3,7 @@
    - 권한은 DB의 RLS가 보장한다. 여기서 select('*')를 해도 볼 수 있는 행만 돌아온다. */
 
 import { DAY, localDate } from "./util.js";
+import { setAssistScale } from "./catalog.js";
 
 const cfg = window.SOAPO_CONFIG ?? {};
 /** 비밀번호 재설정 메일 링크로 들어왔는지 (Supabase가 주소를 지우기 전에 기억) */
@@ -28,22 +29,25 @@ export function explain(err) {
   if (/Failed to fetch|NetworkError/i.test(m)) return "서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.";
   if (/row-level security|permission denied/i.test(m)) return "이 작업을 할 권한이 없습니다.";
   if (/duplicate key.*profiles_pkey/i.test(m)) return "이미 가입된 계정입니다. 새로고침해 주세요.";
+  if (/patients_chart_no/i.test(m)) return "같은 차트번호의 환자가 이미 있습니다.";
   return m;
 }
 const must = ({ data, error }) => { if (error) throw error; return data; };
 
 /* ---------- 행 → 화면 모델 ---------- */
 const mapGoal = (g) => ({ id: g.id, patientId: g.patient_id, type: g.type, text: g.text, due: g.due_date, status: g.status });
-const mapScore = (x) => ({ id: x.id, patientId: x.patient_id, date: x.measured_on, tool: x.tool, value: +x.value, max: x.max_value == null ? null : +x.max_value });
+const mapScore = (x) => ({ id: x.id, patientId: x.patient_id, date: x.measured_on, tool: x.tool, value: +x.value, max: x.max_value == null ? null : +x.max_value, details: x.details ?? null, createdAt: x.created_at });
 const mapNote = (n) => ({ id: n.id, patientId: n.patient_id, date: n.session_date, author: n.author_id, status: n.status, s: n.s, o: n.o, a: n.a, p: n.p, signedAt: n.signed_at, amendsId: n.amends_id, amendReason: n.amend_reason, createdAt: n.created_at });
 const mapProgram = (x) => ({ id: x.id, patientId: x.patient_id, title: x.title, detail: x.instructions, target: x.target_count, unit: x.unit, perDay: x.per_day, camera: x.camera_metric, targetAngle: x.target_angle ?? 90 });
 const mapSession = (x) => ({ id: x.id, patientId: x.patient_id, programId: x.program_id, at: x.performed_at, date: localDate(new Date(x.performed_at)), reps: x.reps, maxAngle: x.max_angle, pain: x.pain, comment: x.comment, source: x.source });
 const mapAppt = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, startsAt: x.starts_at, date: localDate(new Date(x.starts_at)), duration: x.duration_min, kind: x.kind, status: x.status, note: x.note });
-const mapVisit = (x) => ({ id: x.id, groupId: x.group_id, patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
+const mapVisit = (x) => ({ id: x.id, groupId: x.group_id, goalIds: x.goal_ids ?? [], patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
 const mapSymptom = (x) => ({ id: x.id, patientId: x.patient_id, date: x.logged_on, pain: x.pain, fatigue: x.fatigue, mood: x.mood, sleep: x.sleep, note: x.note });
 function mapPatient(x) {
   return { id: x.id, name: x.name, age: x.birth_year ? new Date().getFullYear() - x.birth_year : null, birthYear: x.birth_year, sex: x.sex, diagnosis: x.diagnosis, onset: x.onset_date,
-    therapistId: x.therapist_id, userId: x.user_id, invite: x.invite_code, affectedSide: x.affected_side, firstVisit: x.first_visit_on, birthDate: x.birth_date, goals: [], scores: [] };
+    therapistId: x.therapist_id, userId: x.user_id, invite: x.invite_code, affectedSide: x.affected_side, firstVisit: x.first_visit_on, birthDate: x.birth_date,
+    chartNo: x.chart_no, precautions: x.precautions ?? [], precautionNote: x.precaution_note, weightBearing: x.weight_bearing, dietFood: x.diet_food, dietDrink: x.diet_drink,
+    status: x.status ?? "active", dischargedOn: x.discharged_on, dischargeReason: x.discharge_reason, goals: [], scores: [] };
 }
 function mapMessage(m) {
   const p = cache.patients.find((x) => x.id === m.patient_id);
@@ -55,6 +59,8 @@ function mapMessage(m) {
 const byTime = (a, b) => a.startsAt.localeCompare(b.startsAt);
 export const view = {
   patient: (id) => cache.patients.find((p) => p.id === id),
+  /** 치료 중인 환자 (종결 제외) */
+  active: () => cache.patients.filter((p) => p.status !== "discharged"),
   /** 서명된 기록 (정정 기록 포함, 임시 저장 제외) */
   notes: (pid) => cache.notes.filter((n) => n.patientId === pid && n.status !== "draft").sort((a, b) => b.date.localeCompare(a.date) || (b.signedAt ?? "").localeCompare(a.signedAt ?? "")),
   /** 임시 저장한 SOAP 초안 (날짜를 주면 그 날짜 것만) */
@@ -78,6 +84,7 @@ export const view = {
 export async function loadProfile(userId) {
   const rows = must(await sb.from("profiles").select("*").eq("id", userId));
   cache.profile = rows[0] ?? null;
+  if (cache.profile) { cache.profile.prefs ??= {}; setAssistScale(cache.profile.prefs.assistScale); }
   return cache.profile;
 }
 
@@ -141,13 +148,24 @@ export const auth = {
 
 /* ---------- 쓰기 ---------- */
 export async function createPatient(f) {
-  const row = must(await sb.from("patients").insert({ therapist_id: cache.profile.id, name: f.name, birth_date: f.birthDate || null, first_visit_on: f.firstVisit || null }).select().single());
+  const row = must(await sb.from("patients").insert({ therapist_id: cache.profile.id, name: f.name, birth_date: f.birthDate || null, first_visit_on: f.firstVisit || null, chart_no: f.chartNo || null }).select().single());
   const p = mapPatient(row); cache.patients.push(p); return p;
 }
-/** 이름·생년월일·첫 내원일 수정 */
+/** 환자 정보 수정. 화면 이름(camelCase) → DB 열 이름 */
+const PATIENT_COLS = { name: "name", birthDate: "birth_date", firstVisit: "first_visit_on", chartNo: "chart_no", diagnosis: "diagnosis", onset: "onset_date", affectedSide: "affected_side",
+  precautions: "precautions", precautionNote: "precaution_note", weightBearing: "weight_bearing", dietFood: "diet_food", dietDrink: "diet_drink",
+  status: "status", dischargedOn: "discharged_on", dischargeReason: "discharge_reason" };
 export async function updatePatient(pid, f) {
-  const row = must(await sb.from("patients").update({ name: f.name, birth_date: f.birthDate || null, first_visit_on: f.firstVisit || null }).eq("id", pid).select().single());
-  Object.assign(view.patient(pid), { name: row.name, birthDate: row.birth_date, firstVisit: row.first_visit_on });
+  const body = {};
+  for (const [k, v] of Object.entries(f)) if (PATIENT_COLS[k]) body[PATIENT_COLS[k]] = v === "" ? null : v;
+  const row = must(await sb.from("patients").update(body).eq("id", pid).select().single());
+  const p = view.patient(pid), fresh = mapPatient(row);
+  Object.assign(p, { ...fresh, goals: p.goals, scores: p.scores });
+}
+/** 치료사 설정 저장 (도움 수준 표기, 치료 분야) */
+export async function savePrefs(prefs) {
+  const row = must(await sb.from("profiles").update({ prefs }).eq("id", cache.profile.id).select("prefs").single());
+  cache.profile.prefs = row.prefs; setAssistScale(row.prefs.assistScale);
 }
 export async function reissueInvite(pid) {
   const code = must(await sb.rpc("reissue_invite", { p_patient: pid }));
@@ -161,9 +179,11 @@ export async function setGoalStatus(pid, gid, status) {
   must(await sb.from("goals").update({ status }).eq("id", gid));
   const g = view.patient(pid).goals.find((x) => x.id === gid); if (g) g.status = status;
 }
-export async function addScore(pid, s) {
-  const row = must(await sb.from("assessments").insert({ patient_id: pid, tool: s.tool, value: s.value, max_value: s.max ?? null, measured_on: s.date }).select().single());
-  view.patient(pid).scores.push(mapScore(row));
+/** 평가 점수 여러 개를 한 번에 저장 (세부 평가는 부위·항목마다 한 행) */
+export async function addScores(pid, list) {
+  const rows = must(await sb.from("assessments").insert(list.map((s) => ({ patient_id: pid, tool: s.tool, value: s.value, max_value: s.max ?? null, measured_on: s.date, details: s.details ?? null }))).select());
+  view.patient(pid).scores.push(...rows.map(mapScore));
+  return rows.length;
 }
 const putNote = (row) => { cache.notes = cache.notes.filter((n) => n.id !== row.id); cache.notes.push(mapNote(row)); return row.id; };
 /** SOAP 임시 저장: 처음이면 새 초안, 이미 있으면 덮어쓴다. 초안 id를 돌려준다 */
@@ -208,7 +228,7 @@ export async function setAppointmentStatus(id, status) {
   must(await sb.from("appointments").update({ status }).eq("id", id));
   const a = cache.appointments.find((x) => x.id === id); if (a) a.status = status;
 }
-const visitBody = (v) => ({ appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null });
+const visitBody = (v) => ({ goal_ids: v.goalIds ?? [], appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null });
 async function completeAppointments(ids) {
   const todo = cache.appointments.filter((a) => ids.includes(a.id) && a.status === "scheduled");
   if (!todo.length) return;
