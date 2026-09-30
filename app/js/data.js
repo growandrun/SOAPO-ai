@@ -35,7 +35,7 @@ const mapAppt = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.ther
 const mapSymptom = (x) => ({ id: x.id, patientId: x.patient_id, date: x.logged_on, pain: x.pain, fatigue: x.fatigue, mood: x.mood, sleep: x.sleep, note: x.note });
 function mapPatient(x) {
   return { id: x.id, name: x.name, age: x.birth_year ? new Date().getFullYear() - x.birth_year : null, birthYear: x.birth_year, sex: x.sex, diagnosis: x.diagnosis, onset: x.onset_date,
-    therapistId: x.therapist_id, userId: x.user_id, invite: x.invite_code, affectedSide: x.affected_side, goals: [], scores: [] };
+    therapistId: x.therapist_id, userId: x.user_id, invite: x.invite_code, affectedSide: x.affected_side, firstVisit: x.first_visit_on, goals: [], scores: [] };
 }
 function mapMessage(m) {
   const p = cache.patients.find((x) => x.id === m.patient_id);
@@ -114,7 +114,7 @@ export const auth = {
 
 /* ---------- 쓰기 ---------- */
 export async function createPatient(f) {
-  const row = must(await sb.from("patients").insert({ therapist_id: cache.profile.id, name: f.name, birth_year: f.birthYear || null, sex: f.sex || null, diagnosis: f.diagnosis || null, onset_date: f.onset || null, affected_side: f.affectedSide }).select().single());
+  const row = must(await sb.from("patients").insert({ therapist_id: cache.profile.id, name: f.name, first_visit_on: f.firstVisit || null }).select().single());
   const p = mapPatient(row); cache.patients.push(p); return p;
 }
 export async function reissueInvite(pid) {

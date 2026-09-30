@@ -27,8 +27,7 @@ export function railHtml() {
     const d = al.filter((y) => y.level === "danger").length, w = al.filter((y) => y.level === "warn").length;
     const un = view.unread(x.id);
     return `<button class="pitem" data-act="pick" data-id="${x.id}" aria-current="${state.tView === "patient" && x.id === state.selected}">
-      <div class="row"><strong>${h(x.name)}</strong><span class="small muted">${x.age ? x.age + "세" : ""} ${h(x.sex ?? "")}</span></div>
-      <span class="small muted">${h(x.diagnosis ?? "")}</span>
+      <div class="row"><strong>${h(x.name)}</strong>${x.firstVisit ? `<span class="small muted mono">내원 ${fmtDate(x.firstVisit)}</span>` : ""}</div>
       <div class="flags">${d ? `<span class="pill danger">위험 ${d}</span>` : ""}${w ? `<span class="pill warn">주의 ${w}</span>` : ""}${!d && !w ? `<span class="pill ok">양호</span>` : ""}${un ? `<span class="pill info">메시지 ${un}</span>` : ""}${x.userId ? "" : `<span class="pill plain">앱 미가입</span>`}</div>
     </button>`; }).join("")}</div>`;
 }
@@ -114,7 +113,7 @@ function caseloadTable() {
     const goalsActive = p.goals.filter((g) => g.status === "active").length, goalsMet = p.goals.filter((g) => g.status === "met").length;
     const un = view.unread(p.id);
     return `<tr>
-      <td><button class="linklike" data-act="pick" data-id="${p.id}"><b>${h(p.name)}</b></button><div class="small muted">${h(p.diagnosis ?? "")}</div></td>
+      <td><button class="linklike" data-act="pick" data-id="${p.id}"><b>${h(p.name)}</b></button>${p.firstVisit ? `<div class="small muted">내원 ${fmtDate(p.firstVisit)}</div>` : ""}</td>
       <td class="num">${st.adherence == null ? `<span class="muted">처방 없음</span>` : `<span class="pill ${st.adherence >= 80 ? "ok" : st.adherence >= 50 ? "plain" : "warn"}">${st.adherence}%</span>`}</td>
       <td>${spark(pains)}</td>
       <td class="num">${k ? `${k.value}${k.prev != null ? ` <span class="small ${k.value >= k.prev ? "up" : "down"}">${k.value >= k.prev ? "▲" : "▼"}${Math.abs(k.value - k.prev)}</span>` : ""}<div class="small muted">${h(k.tool)}</div>` : `<span class="muted">–</span>`}</td>
@@ -146,23 +145,19 @@ function patientDetailHtml(p) {
   const tabs = [["overview", "요약·AI 검진"], ["schedule", "일정·컨디션"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
   const member = cache.names[p.userId];
   return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}</h1>
-      <div class="meta">${p.age ? `<span>${p.age}세 ${h(p.sex ?? "")}</span>` : ""}${p.diagnosis ? `<span>${h(p.diagnosis)}</span>` : ""}${p.onset ? `<span>발병 ${h(p.onset)}</span>` : ""}
+      <div class="meta">${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
         ${p.userId ? `<span class="pill ok">앱 가입${member && member !== p.name ? ` · ${h(member)}` : ""}</span>` : `<span>초대 코드 <b class="mono">${h(p.invite ?? "")}</b> <button class="btn sm" data-act="copy-invite">복사</button> <button class="btn sm ghost" data-act="reissue">새 코드</button></span>`}</div></div></div>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-act="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`).join("")}</div>
     ${{ overview: tOverview, schedule: tSchedule, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
 }
 
 function newPatientHtml() {
-  return `<section class="panel" style="max-width:40rem">
+  return `<section class="panel" style="max-width:34rem">
     <h2>환자 등록</h2>
-    <p class="small muted">등록하면 초대 코드가 만들어집니다. 환자나 보호자에게 코드를 알려 주면 앱에 가입해 가정 운동, 컨디션 기록, 메시지를 쓸 수 있습니다.</p>
+    <p class="small muted">이름과 첫 내원일만 입력해 환자를 추가합니다. 진단이나 병력 같은 의료 정보는 여기서 받지 않습니다. 등록하면 초대 코드가 만들어지고, 환자나 보호자에게 알려 주면 앱에 가입할 수 있습니다.</p>
     <form id="f-patient" class="formgrid">
-      <div class="field"><label class="label" for="np-name">이름</label><input type="text" id="np-name" required></div>
-      <div class="field"><label class="label" for="np-birth">출생 연도</label><input type="text" id="np-birth" inputmode="numeric" placeholder="1958"></div>
-      <div class="field"><label class="label" for="np-sex">성별</label><select id="np-sex"><option value="">선택 안 함</option><option>남</option><option>여</option></select></div>
-      <div class="field"><label class="label" for="np-side">마비·손상 측</label><select id="np-side"><option value="right">오른쪽</option><option value="left">왼쪽</option><option value="both">양쪽</option></select></div>
-      <div class="field wide"><label class="label" for="np-dx">진단</label><input type="text" id="np-dx" placeholder="예: 뇌경색 (좌측 MCA) · 우측 편마비"></div>
-      <div class="field"><label class="label" for="np-onset">발병일</label><input type="date" id="np-onset"></div>
+      <div class="field"><label class="label" for="np-name">이름</label><input type="text" id="np-name" required autocomplete="off"></div>
+      <div class="field"><label class="label" for="np-visit">첫 내원일</label><input type="date" id="np-visit" value="${localDate()}" required></div>
       <div class="toolbar wide"><button class="btn primary" type="submit">등록</button>${cache.patients.length ? `<button class="btn ghost" type="button" data-act="t-dashboard">취소</button>` : ""}</div>
     </form></section>`;
 }

@@ -218,8 +218,7 @@ document.addEventListener("submit", async (e) => {
         return;
       }
       case "f-patient": {
-        const birth = +v("np-birth");
-        const np = await run(btn, () => D.createPatient({ name: v("np-name"), birthYear: birth > 1900 ? birth : null, sex: v("np-sex"), diagnosis: v("np-dx"), onset: v("np-onset"), affectedSide: v("np-side") }));
+        const np = await run(btn, () => D.createPatient({ name: v("np-name"), firstVisit: v("np-visit") }));
         Object.assign(state, { selected: np.id, tView: "patient", tab: "overview" });
         toast(`등록했습니다. 초대 코드: ${np.invite}`); return render();
       }

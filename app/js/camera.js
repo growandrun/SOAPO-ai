@@ -6,12 +6,20 @@ import { h } from "./util.js";
 const MP_VER = "0.10.14";
 let cam = null;
 
+const SIDE_KEY = "soapo-cam-side";
+const savedSide = () => { try { return localStorage.getItem(SIDE_KEY); } catch { return null; } };
+
 export function openCamera(prog, affectedSide, onSave) {
-  cam = { prog, reps: 0, maxAngle: 0, up: false, stream: null, raf: 0, sim: false, landmarker: null, side: affectedSide === "left" ? "left" : "right", onSave };
+  const side = savedSide() ?? (affectedSide === "left" ? "left" : "right");
+  cam = { prog, reps: 0, maxAngle: 0, up: false, stream: null, raf: 0, sim: false, landmarker: null, side, onSave };
   const m = document.createElement("div"); m.className = "modal"; m.id = "cam-modal";
   m.innerHTML = `<div class="box" role="dialog" aria-modal="true" aria-label="카메라 운동">
     <div class="toolbar" style="justify-content:space-between"><h2>${h(prog.title)}</h2><button class="btn ghost" data-cam="close">닫기</button></div>
     <p class="small muted">${h(prog.detail)} 팔이 ${prog.targetAngle}° 이상 올라갔다 내려오면 1회로 셉니다. 영상은 이 기기 안에서만 분석하고 저장하지 않습니다.</p>
+    <div class="seg" role="group" aria-label="측정할 팔">
+      <button type="button" data-cam="side" data-side="right" aria-pressed="${side === "right"}">오른팔 측정</button>
+      <button type="button" data-cam="side" data-side="left" aria-pressed="${side === "left"}">왼팔 측정</button>
+    </div>
     <div class="stage"><video id="cam-video" playsinline muted></video><canvas id="cam-canvas"></canvas>
       <div class="hud"><b id="hud-angle">0°</b><b id="hud-reps">0 / ${prog.target}</b></div>
       <div class="center" id="cam-center">카메라와 자세 인식 모델을 준비하는 중…</div></div>
@@ -34,6 +42,12 @@ async function onClick(e) {
   const b = e.target.closest("[data-cam]"); if (!b || !cam) return;
   if (b.dataset.cam === "close") return close();
   if (b.dataset.cam === "sim") return simulate();
+  if (b.dataset.cam === "side") {
+    cam.side = b.dataset.side; cam.reps = 0; cam.maxAngle = 0; cam.up = false;
+    try { localStorage.setItem(SIDE_KEY, cam.side); } catch {}
+    document.querySelectorAll('[data-cam="side"]').forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.side === cam.side)));
+    return;
+  }
   if (b.dataset.cam === "save") {
     const box = document.getElementById("cam-modal");
     const result = { programId: cam.prog.id, reps: cam.reps, maxAngle: cam.maxAngle, pain: +box.querySelector("#c-pain").value, comment: box.querySelector("#c-comment").value.trim(), source: "camera" };

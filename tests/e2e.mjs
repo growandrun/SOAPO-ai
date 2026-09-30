@@ -23,7 +23,7 @@ const localDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(tod
 await fetch(`${MAIL}/api/v1/messages`, { method: 'DELETE' });
 const b = await chromium.launch();
 const errs = [];
-const mk = async (name, vp) => { const c = await b.newContext({ ignoreHTTPSErrors: true, viewport: vp }); const p = await c.newPage();
+const mk = async (name, vp) => { const c = await b.newContext({ ignoreHTTPSErrors: true, viewport: vp, colorScheme: process.env.DARK ? 'dark' : 'light' }); const p = await c.newPage();
   p.on('pageerror', (e) => errs.push(`${name} pageerror: ${e.message}`)); p.on('console', (m) => m.type() === 'error' && errs.push(`${name}: ${m.text()}`)); return p; };
 const T = await mk('T', { width: 1280, height: 900 }), P = await mk('P', { width: 390, height: 844 });
 const step = (s) => console.log('✓', s);
@@ -42,8 +42,9 @@ if ((await T.getAttribute('[data-role=therapist]', 'aria-pressed')) !== 'true') 
 step('메일 링크 → 가입 마무리 (치료사 미리 선택됨)');
 await T.fill('#ob-name', '김하늘'); await T.fill('#ob-license', '제12345호'); await T.check('#ob-consent'); await T.click('#f-onboard button[type=submit]');
 await T.waitForSelector('#f-patient'); step('치료사 가입 → 첫 환자 등록 화면');
-await T.fill('#np-name', '박영수'); await T.fill('#np-birth', '1958'); await T.selectOption('#np-sex', '남'); await T.fill('#np-dx', '뇌경색 · 우측 편마비'); await T.click('#f-patient button[type=submit]');
-await T.waitForSelector('.phead h1'); const invite = (await T.textContent('.phead b.mono')).trim(); step(`환자 등록, 초대 코드 ${invite}`);
+await shot(T, '0-register'); if (await T.$('#np-dx')) throw new Error('등록 화면에 의료 정보 칸이 남아 있음');
+await T.fill('#np-name', '박영수'); await T.fill('#np-visit', localDate); await T.click('#f-patient button[type=submit]');
+await T.waitForSelector('.phead h1'); if (!(await text(T, '.phead')).includes('첫 내원')) throw new Error('첫 내원일 표시 없음'); const invite = (await T.textContent('.phead b.mono')).trim(); step(`환자 등록, 초대 코드 ${invite}`);
 await T.click('details:has(#f-goal) summary'); await T.fill('#g-text', '변형 숟가락을 사용하여 식사를 2주 이내에 수정된 독립(Mod I) 수준으로 수행한다.'); await T.fill('#g-due', localDate); await T.click('#f-goal button[type=submit]');
 await T.waitForSelector('.goals li');
 for (const [v, d] of [['48', '2026-09-16'], ['55', '2026-09-23']]) { await T.click('details:has(#f-score) summary'); await T.fill('#sc-value', v); await T.fill('#sc-date', d); await T.click('#f-score button[type=submit]'); await T.waitForTimeout(400); }
@@ -73,7 +74,8 @@ await P.$eval('#sy-pain', (el) => { el.value = 7; el.dispatchEvent(new Event('in
 await P.fill('#sy-note', '어깨가 아침에 뻣뻣해요'); await P.click('#f-symptom button[type=submit]');
 await P.waitForSelector('.symptoms'); await shot(P, '3-patient-home'); step('오늘 컨디션 저장 (통증 7 → 치료사에게 자동 알림)');
 await P.click('[data-tab=exercise]'); await P.click('[data-act=manual]'); await P.waitForSelector('.done');
-await P.click('[data-act=cam]'); await P.waitForSelector('#sim-btn:not([hidden])', { timeout: 15000 }); await P.click('#sim-btn');
+await P.click('[data-act=cam]'); await P.click('[data-side=left]'); if ((await P.getAttribute('[data-side=left]', 'aria-pressed')) !== 'true') throw new Error('왼팔 선택 안 됨');
+await P.waitForSelector('#sim-btn:not([hidden])', { timeout: 15000 }); await P.click('#sim-btn');
 await P.waitForFunction(() => +document.getElementById('c-reps').textContent >= 2, null, { timeout: 20000 });
 await P.click('[data-cam=save]'); await P.waitForFunction(() => !document.getElementById('cam-modal')); step('운동 기록 (직접 + 카메라 시뮬레이션)');
 await P.click('[data-tab=msg]'); await P.fill('#msg-text', '오늘 손이 좀 저려요'); await P.click('#f-msg button');
