@@ -2,9 +2,10 @@
 
 작업치료사의 SOAP 노트 작성과 환자의 가정 재활을 AI로 연결하는 서비스입니다.
 
-- **치료사**: 환자 등록, 목표·평가 점수 관리, AI가 만든 SOAP 초안과 실시간 기록 점검, 서명(서명 후 수정 불가), 가정 운동 처방, 환자별 위험 신호 자동 검진, 메시지
-- **환자**: 초대 코드로 가입, 휴대폰·노트북 카메라로 운동 각도·횟수 측정, 쉬운 말로 된 회복 기록, 치료사와 실시간 메시지
-- **로그인**: 비밀번호 없이 이메일로 받은 링크 또는 6자리 코드
+- **홈페이지**: 서비스 소개와 환자·보호자 / 작업치료사 가입을 나눠서 시작
+- **치료사**: 대시보드(오늘 일정, 확인이 필요한 환자, 다가오는 재평가·목표 기한, 환자 현황), 치료 일정 관리, 환자 등록, 목표·평가 점수 관리, AI가 만든 SOAP 초안과 실시간 기록 점검, 서명(서명 후 수정 불가), 가정 운동 처방, 환자별 위험 신호 자동 검진, 메시지
+- **환자·보호자**: 홈 대시보드(다음 치료, 오늘 운동, 연속 기록, 오늘 컨디션, 목표), 보호자 가입, 초대 코드로 가입, 휴대폰·노트북 카메라로 운동 각도·횟수 측정, 쉬운 말로 된 회복 기록, 치료사와 실시간 메시지
+- **로그인**: 비밀번호 없이 이메일로 받은 링크 또는 숫자 인증 코드
 
 ## 폴더
 
@@ -16,11 +17,12 @@
 | `vercel.json`, `scripts/build.mjs` | Vercel 배포 설정과 빌드 (환경 변수로 `config.js` 생성) |
 | `.github/workflows/` | 자동 테스트(`ci.yml`)와 Supabase 설정 적용(`supabase.yml`) |
 | `supabase/migrations/` | DB 테이블, 권한(RLS), 가입 함수 |
-| `supabase/templates/` | 한국어 로그인 메일 (링크 + 6자리 코드) |
+| `supabase/templates/` | 한국어 로그인 메일 (링크 + 인증 코드) |
 | `supabase/tests/rls_test.sql` | 권한 테스트 24개 (다른 치료사·환자 데이터가 안 보이는지) |
 | `tests/e2e.mjs` | 치료사·환자 두 브라우저로 전체 흐름을 확인하는 테스트 |
 | `prototype/index.html` | 설치 없이 열어 보는 데모 (가짜 데이터) |
 | `docs/ARCHITECTURE.md` | 전체 구조, AI 설계, 법규 체크리스트, 로드맵 |
+| `docs/DASHBOARD_RESEARCH.md` | 치료사·환자 대시보드에 넣은 정보와 조사 근거 |
 
 ## 1. 내 컴퓨터에서 실행하기
 
@@ -71,7 +73,7 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
 2. [Authentication → Emails](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/templates)
    - **Magic link**와 **Confirm signup** 두 곳 모두 제목을 `SOAPO 재활노트 로그인`으로 바꿉니다.
    - 본문에는 `supabase/templates/magic_link.html` 내용을 붙여 넣습니다.
-   - 이 템플릿에 6자리 코드가 들어 있어야 다른 기기에서 메일을 연 환자도 로그인할 수 있습니다.
+   - 이 템플릿에 인증 코드가 들어 있어야 다른 기기에서 메일을 연 환자도 로그인할 수 있습니다.
 
 **방법 B: 자동 (GitHub Actions)**
 1. [Access Token](https://supabase.com/dashboard/account/tokens)을 만듭니다.
@@ -82,7 +84,7 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
 
 Secret `SUPABASE_DB_PASSWORD`도 넣어 두면, 이후 `supabase/migrations/`에 새 파일이 push될 때 DB에도 자동으로 적용됩니다.
 
-> Vercel 미리보기 주소(브랜치별 배포)에서는 메일 링크가 운영 주소로 돌아갑니다. 미리보기에서는 메일 속 **6자리 코드**로 로그인하세요.
+> Vercel 미리보기 주소(브랜치별 배포)에서는 메일 링크가 운영 주소로 돌아갑니다. 미리보기에서는 메일 속 **인증 코드**로 로그인하세요.
 
 ### ③ 환자에게 메일이 가게 하기 (무료 Gmail, 5분)
 Supabase 기본 메일은 **프로젝트 팀원 주소로만, 시간당 몇 통**만 보냅니다. 무료 Gmail 계정으로 보내면 도메인 없이 누구에게나 **하루 500명까지** 보낼 수 있습니다.

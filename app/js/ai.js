@@ -65,8 +65,20 @@ export function latestScores(scores) {
 }
 
 /** 치료사 대시보드용 자동 검진 (위험 신호) */
-export function screen(patient, { programs, sessions, notes }) {
+export function screen(patient, { programs, sessions, notes, symptoms = [], appointments = [] }) {
   const out = [];
+  const recent = symptoms.filter((x) => x.date > localDate(new Date(Date.now() - 4 * DAY)));
+  const worst = recent.reduce((m, x) => (x.pain > (m?.pain ?? -1) ? x : m), null);
+  if (worst && worst.pain >= 6) out.push({ level: "danger", text: `컨디션 기록 통증 ${worst.pain}/10 (${fmtDate(worst.date)})${worst.note ? ` “${worst.note}”` : ""}` });
+  const tail = symptoms.slice(-6);
+  if (tail.length >= 6) {
+    const avg = (a) => a.reduce((t, x) => t + x.pain, 0) / a.length;
+    const before = avg(tail.slice(0, 3)), after = avg(tail.slice(3));
+    if (after >= before + 2) out.push({ level: "warn", text: `통증이 올라가는 추세입니다 (평균 ${before.toFixed(1)} → ${after.toFixed(1)}).` });
+  }
+  const twoWeeks = new Date(Date.now() - 14 * DAY).toISOString();
+  const noShows = appointments.filter((a) => a.status === "no_show" && a.startsAt >= twoWeeks).length;
+  if (noShows) out.push({ level: "warn", text: `최근 2주 치료 결석 ${noShows}회. 이동·보호자 사정을 확인해 보세요.` });
   const today = localDate();
   const st = homeStats(programs, sessions);
   if (st.adherence !== null && st.adherence < 50) out.push({ level: "warn", text: `최근 7일 가정 훈련 수행률 ${st.adherence}% (${st.done}/${st.expected}회). 동기나 이해도를 확인해 보세요.` });
@@ -88,7 +100,7 @@ export function screen(patient, { programs, sessions, notes }) {
 }
 
 /** SOAP 초안: 가정 훈련·메시지·점수를 모아 치료사가 고칠 초안을 만든다. 모르는 부분은 [ ]로 남긴다. */
-export function draftNote(patient, { programs, sessions, messages }) {
+export function draftNote(patient, { programs, sessions, messages, symptoms = [] }) {
   const st = homeStats(programs, sessions);
   const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
   const msgs = messages.filter((m) => m.from === "patient" && m.at >= weekAgo);
@@ -97,6 +109,7 @@ export function draftNote(patient, { programs, sessions, messages }) {
   const s = [
     ...msgs.map((m) => `환자(메시지 ${fmtDate(m.at)}): "${m.text}"`),
     ...st.painNotes.map((x) => `가정 훈련 기록: ${x}`),
+    ...symptomSummary(symptoms),
   ].join("\n") || "환자: \"\"  ← 오늘 환자가 한 말을 적어 주세요";
   const camLine = st.cam.length ? `- 가정 카메라 기록: 어깨 굽힘 최대 ${st.cam[st.cam.length - 1].maxAngle}° (최근 7일 첫 기록 ${st.cam[0].maxAngle}°)` : null;
   const o = [
@@ -145,4 +158,23 @@ export function replyDraft(patient, { programs, sessions, messages }) {
     return `${first}님, 알려 주셔서 감사해요. 당분간 운동은 통증이 없는 범위${ang ? `(약 ${Math.max(60, ang - 15)}°)` : ""}까지만 해 주세요. 다음 치료 때 직접 확인할게요.`;
   }
   return st.adherence != null ? `${first}님, 이번 주 가정 운동 수행률이 ${st.adherence}%예요. 잘하고 계세요!` : `${first}님, 오늘 치료 수고 많으셨어요.`;
+}
+
+/** 최근 7일 컨디션 기록 요약 (SOAP의 S에 넣을 문장) */
+export function symptomSummary(symptoms) {
+  const week = symptoms.filter((x) => x.date > localDate(new Date(Date.now() - 7 * DAY)));
+  if (!week.length) return [];
+  const avg = (k) => { const v = week.map((x) => x[k]).filter((x) => x != null); return v.length ? (v.reduce((t, x) => t + x, 0) / v.length).toFixed(1) : null; };
+  const max = Math.max(...week.map((x) => x.pain));
+  const notes = week.filter((x) => x.note).map((x) => `${fmtDate(x.date)} “${x.note}”`);
+  return [`환자 컨디션 기록(최근 7일 ${week.length}회): 통증 평균 ${avg("pain")}/10, 최고 ${max}/10${avg("fatigue") ? `, 피로 평균 ${avg("fatigue")}/10` : ""}`, ...notes.map((n) => `컨디션 메모: ${n}`)];
+}
+
+/** 오늘까지 하루도 빠짐없이 운동을 기록한 날 수 (오늘 아직 안 했으면 어제부터 셈) */
+export function streakDays(sessions) {
+  const days = new Set(sessions.map((x) => x.date));
+  let n = 0; let d = new Date();
+  if (!days.has(localDate(d))) d = new Date(Date.now() - DAY);
+  while (days.has(localDate(d))) { n++; d = new Date(d.getTime() - DAY); }
+  return n;
 }

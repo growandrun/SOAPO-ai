@@ -1,6 +1,6 @@
 /* 운영 Supabase 프로젝트의 로그인 설정을 자동으로 맞춘다 (Supabase Management API)
    - 사이트 주소·리디렉션 허용 목록
-   - 한국어 로그인 메일 (링크 + 6자리 코드)
+   - 한국어 로그인 메일 (링크 + 인증 코드)
    - 메일 발송(SMTP): RESEND_API_KEY 또는 SMTP_* 가 있을 때만
    그리고 앱이 쓸 config.js를 만든다.
 
@@ -50,7 +50,6 @@ const auth = {
   mailer_templates_magic_link_content: template,
   mailer_subjects_confirmation: subject,
   mailer_templates_confirmation_content: template,
-  mailer_otp_length: 6,
   mailer_otp_exp: 3600,
 };
 
