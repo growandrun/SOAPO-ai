@@ -3,6 +3,7 @@
    나중에 서버 LLM 호출로 바꿀 때도 입출력 형태를 유지하면 화면 코드는 그대로 쓸 수 있다. */
 
 import { DAY, localDate, fmtDate } from "./util.js";
+import { itemSummary, observation } from "./catalog.js";
 
 export const ASSIST = [["I", "독립"], ["Mod I", "수정된 독립"], ["S", "감독"], ["Min A", "최소 도움"], ["Mod A", "중등도 도움"], ["Max A", "최대 도움"], ["Dep", "전적 도움"]];
 const VAGUE = ["많이", "조금", "좋아", "나빠", "괜찮", "잘 함", "잘함", "못 함", "대체로", "어느 정도"];
@@ -65,8 +66,13 @@ export function latestScores(scores) {
 }
 
 /** 치료사 대시보드용 자동 검진 (위험 신호) */
-export function screen(patient, { programs, sessions, notes, symptoms = [], appointments = [] }) {
+export function screen(patient, { programs, sessions, notes, symptoms = [], appointments = [], visits = [] }) {
   const out = [];
+  const lastVisit = visits[0];
+  if (lastVisit && lastVisit.date >= localDate(new Date(Date.now() - 14 * DAY))) {
+    const risky = lastVisit.observations.filter((k) => ["fall_risk", "dizzy", "skin"].includes(k));
+    if (risky.length) out.push({ level: "warn", text: `${fmtDate(lastVisit.date)} 내원 때 ${risky.map(observation).join(", ")} 관찰. 가정 운동 강도와 안전을 확인해 보세요.` });
+  }
   const recent = symptoms.filter((x) => x.date > localDate(new Date(Date.now() - 4 * DAY)));
   const worst = recent.reduce((m, x) => (x.pain > (m?.pain ?? -1) ? x : m), null);
   if (worst && worst.pain >= 6) out.push({ level: "danger", text: `컨디션 기록 통증 ${worst.pain}/10 (${fmtDate(worst.date)})${worst.note ? ` “${worst.note}”` : ""}` });
@@ -100,7 +106,13 @@ export function screen(patient, { programs, sessions, notes, symptoms = [], appo
 }
 
 /** SOAP 초안: 가정 훈련·메시지·점수를 모아 치료사가 고칠 초안을 만든다. 모르는 부분은 [ ]로 남긴다. */
-export function draftNote(patient, { programs, sessions, messages, symptoms = [] }) {
+/** 초안에 쓸 내원기록: 기록 날짜와 같은 날, 없으면 최근 7일 안의 가장 최근 것 */
+export function visitFor(visits, date) {
+  return visits.find((v) => v.date === date) ?? visits.find((v) => v.date <= date && v.date >= localDate(new Date(new Date(date).getTime() - 7 * DAY))) ?? null;
+}
+
+export function draftNote(patient, { programs, sessions, messages, symptoms = [], visits = [], date = localDate() }) {
+  const visit = visitFor(visits, date);
   const st = homeStats(programs, sessions);
   const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
   const msgs = messages.filter((m) => m.from === "patient" && m.at >= weekAgo);
@@ -116,7 +128,12 @@ export function draftNote(patient, { programs, sessions, messages, symptoms = []
     ...scores.map((x) => `- ${x.tool} ${x.value}${x.max ? "/" + x.max : ""} (측정 ${fmtDate(x.date)}${x.prev != null ? `, 이전 ${x.prev}` : ""})`),
     st.adherence != null ? `- 가정 훈련 수행률 ${st.adherence}% (${st.done}/${st.expected}회), 최대 통증 ${st.maxPain}/10` : null,
     camLine,
-    "- [수행한 작업]: [도움 수준], [소요 시간]분",
+    ...(visit ? [
+      `- 치료 내용 (${fmtDate(visit.date)}${visit.duration ? `, ${visit.duration}분` : ""}):`,
+      ...visit.items.map((it) => `  · ${itemSummary(it, "soap")}`),
+      visit.observations.length ? `- 관찰: ${visit.observations.map(observation).join(", ")}` : null,
+      visit.note ? `- 메모: ${visit.note}` : null,
+    ] : ["- [수행한 작업]: [도움 수준], [소요 시간]분"]),
   ].filter(Boolean).join("\n");
   const k = scores.find((x) => x.tool === "K-MBI");
   const a = [

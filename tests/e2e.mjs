@@ -34,7 +34,9 @@ const shot = async (pg, name) => { if (!process.env.SHOTS) return; try { await p
 const text = async (pg, sel) => (await pg.textContent(sel)).replace(/\s+/g, ' ').trim();
 
 // ── 홈페이지 → 치료사 가입 (메일 링크) ──
-await T.goto(APP, { waitUntil: 'domcontentloaded' }); await T.waitForSelector('.hero h1'); await shot(T, '1-home'); step('홈페이지 표시');
+await T.goto(APP, { waitUntil: 'domcontentloaded' }); await T.waitForSelector('.hero h1'); await shot(T, '1-home');
+if ((await text(T, '.hero')).includes('비밀번호 없이')) throw new Error('홈에 "비밀번호 없이" 문구가 남아 있음');
+step('홈페이지 표시');
 if (await T.$('a[href="demo/"]')) throw new Error('데모 링크가 남아 있음');
 await T.click('.cta [data-mode=therapist]'); await T.waitForSelector('#f-signup');
 if (!(await text(T, '#f-signup h2')).includes('작업치료사 가입')) throw new Error('치료사 가입 화면 아님');
@@ -106,17 +108,30 @@ await P.fill('#msg-text', '실시간 테스트입니다'); await P.click('#f-msg
 await T.waitForFunction(() => document.querySelector('.thread')?.textContent.includes('실시간 테스트'), null, { timeout: 10000 }); step('치료사 화면에 메시지 실시간 도착');
 await T.fill('#msg-text', '통증 없는 범위까지만 해 주세요'); await T.click('#f-msg button');
 await P.waitForFunction(() => document.querySelector('.thread')?.textContent.includes('통증 없는 범위'), null, { timeout: 10000 }); step('보호자 화면에 답장 실시간 도착');
-await T.click('[data-act=t-dashboard]'); await T.click('.appt [data-status=done]'); await T.waitForSelector('[data-act=write-soap]'); step('오늘 일정 완료 → SOAP 쓰기 버튼');
+await T.click('[data-act=t-dashboard]'); await T.click('.appt [data-act=write-visit]'); await T.waitForSelector('#f-visit');
+await T.check('input[name=t][value=dumbbell]'); await T.selectOption('select[name="dumbbell.side"]', 'R'); await T.fill('input[name="dumbbell.weight"]', '2'); await T.fill('input[name="dumbbell.sets"]', '3'); await T.fill('input[name="dumbbell.reps"]', '10'); await T.fill('input[name="dumbbell.how"]', '팔꿈치 90도 유지');
+await T.check('input[name=t][value=eating]'); await T.selectOption('select[name="eating.assist"]', 'MinA'); await T.fill('input[name="eating.minutes"]', '15');
+await T.check('input[name=obs][value=guardian]'); await T.check('input[name=obs][value=fall_risk]');
+await shot(T, '7-therapist-visit-form');
+await T.click('#f-visit button[type=submit]'); await T.waitForSelector('.visit');
+const vt = await text(T, '.main');
+for (const want of ['2kg × 3세트 × 10회', '최소 도움 (Min A)', '낙상 위험 관찰', '치료별 변화']) if (!vt.includes(want)) throw new Error(`내원기록에 "${want}" 없음`);
+step('내원기록: 치료 체크리스트 + 측면·무게·세트·횟수·도움 수준 저장');
+await T.click('[data-act=visit-copy]'); await T.waitForFunction(() => document.querySelector('input[name="dumbbell.weight"]')?.value === '2' && document.querySelector('input[name=t][value=dumbbell]').checked);
+await shot(T, '8-therapist-visits'); step('지난 내원기록 불러오기');
+await T.click('[data-act=t-dashboard]'); await T.waitForSelector('[data-act=write-soap]'); step('내원기록 저장 → 일정 자동 완료 → SOAP 쓰기 버튼');
 await T.click('[data-act=write-soap]'); await T.waitForSelector('#soap-s'); await T.click('[data-act=ai-draft]');
 if (!(await T.inputValue('#soap-s')).includes('컨디션 기록')) throw new Error('SOAP 초안에 컨디션 기록 없음');
-await T.click('[data-act=sign]'); await T.waitForSelector('.toast.error'); step('AI 초안(컨디션 포함) 그대로는 서명 차단');
+if (!(await T.inputValue('#soap-o')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2kg × 3세트 × 10회')) throw new Error('SOAP 초안 O에 내원기록 없음');
+await T.click('[data-act=sign]'); await T.waitForSelector('.toast.error'); step('AI 초안(컨디션·내원기록 포함) 그대로는 서명 차단');
 await T.fill('#soap-o', '- K-MBI 55/100 (이전 48)\n- 식사: 변형 숟가락 사용 시 최소 도움(Min A), 15분');
 await T.fill('#soap-a', 'Rt 쥐기 지구력 저하로 식기 조작 제한. K-MBI 7점 향상으로 STG #1에 대해 진전 양호. 컨디션 기록상 통증 7/10으로 강도 조정 필요.');
 await T.click('[data-act=sign]'); await T.waitForSelector('.note'); step('SOAP 서명 저장');
 
 await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.papp'); await P.click('[data-tab=records]'); await P.waitForSelector('.plain-summary');
 if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환자 기록에 치료사 평가 없음');
-step('환자 내 기록: 점수·통증 그래프·치료사 평가');
+if (!(await text(P, '.papp')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2kg × 3세트 × 10회')) throw new Error('환자 기록에 치료실에서 한 운동 없음');
+step('환자 내 기록: 점수·통증 그래프·치료사 평가·치료실에서 한 운동');
 await P.click('[data-act=logout]'); await P.waitForSelector('.hero'); step('로그아웃 → 홈페이지');
 
 // ── 비밀번호 로그인, 틀린 비밀번호, 비밀번호 찾기 ──

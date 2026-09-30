@@ -1,10 +1,11 @@
-/* 치료사 화면: 대시보드 + 환자별 상세 (요약, 일정·컨디션, SOAP, 이력, 가정 프로그램, 메시지) */
+/* 치료사 화면: 대시보드 + 환자별 상세 (요약, 일정·컨디션, 내원기록, SOAP, 이력, 가정 프로그램, 메시지) */
 import { cache, view } from "./data.js";
 import * as AI from "./ai.js";
 import { state } from "./state.js";
 import { h, localDate, fmtDate, DAY } from "./util.js";
 import { lineChart, spark } from "./charts.js";
 import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday, fmtBirth } from "./layout.js";
+import { FIELDS, GROUPS, TREATMENTS, OBSERVATIONS, treatment, levelsOf, levelLabelOf, itemSummary, observation } from "./catalog.js";
 
 const LEVEL_ORDER = { danger: 0, warn: 1, info: 2 };
 const plusDays = (n) => localDate(new Date(Date.now() + n * DAY));
@@ -59,6 +60,7 @@ function dashboardHtml() {
       <span class="appt-act">${a.status === "scheduled" && !withDate
         ? `<button class="btn sm" data-act="appt-status" data-id="${a.id}" data-status="done">완료</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="no_show">결석</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="cancelled">취소</button>`
         : `<span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span>`}
+        ${a.status !== "cancelled" && a.status !== "no_show" && !withDate && !visitLinked(a) ? `<button class="btn sm" data-act="write-visit" data-id="${a.patientId}" data-appt="${a.id}">내원기록</button>` : ""}
         ${a.status === "done" && !noteToday ? `<button class="btn sm primary" data-act="write-soap" data-id="${a.patientId}" data-date="${a.date}">SOAP 쓰기</button>` : ""}</span>
     </li>`;
   };
@@ -143,7 +145,7 @@ function apptForm(patientId) {
 /* ================= 환자 상세 ================= */
 function patientDetailHtml(p) {
   const un = view.unread(p.id);
-  const tabs = [["overview", "요약·AI 검진"], ["schedule", "일정·컨디션"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
+  const tabs = [["overview", "요약·AI 검진"], ["schedule", "일정·컨디션"], ["visits", "내원기록"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
   const member = cache.names[p.userId];
   return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}</h1>
       <div class="meta">${p.birthDate ? `<span>생년월일 ${fmtBirth(p.birthDate)}</span>` : `<span class="pill warn">생년월일 미입력</span>`}${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
@@ -156,7 +158,7 @@ function patientDetailHtml(p) {
         <div class="wide"><button class="btn primary sm" type="submit">저장</button></div>
       </form></details>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-act="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`).join("")}</div>
-    ${{ overview: tOverview, schedule: tSchedule, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
+    ${{ overview: tOverview, schedule: tSchedule, visits: tVisits, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
 }
 
 function newPatientHtml() {
@@ -226,7 +228,8 @@ function tSchedule(p) {
     <span class="appt-who">${KIND[a.kind]} · ${a.duration}분${a.note ? ` <span class="small muted">· ${h(a.note)}</span>` : ""}</span>
     <span class="appt-act">${a.status === "scheduled"
       ? `<button class="btn sm" data-act="appt-status" data-id="${a.id}" data-status="done">완료</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="no_show">결석</button><button class="btn sm ghost" data-act="appt-status" data-id="${a.id}" data-status="cancelled">취소</button>`
-      : `<span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span>`}</span></li>`;
+      : `<span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span>`}
+      ${a.status === "done" || (a.status === "scheduled" && a.date <= localDate()) ? visitLinked(a) ? `<span class="pill ok">내원기록</span>` : `<button class="btn sm" data-act="write-visit" data-id="${a.patientId}" data-appt="${a.id}">내원기록</button>` : ""}</span></li>`;
   return `<div class="grid2">
     <section class="panel"><h2>치료 일정</h2>
       ${upcoming.length ? `<ul class="appts">${upcoming.map(row).join("")}</ul>` : `<p class="muted small">예정된 치료가 없습니다.</p>`}
@@ -240,6 +243,88 @@ function tSchedule(p) {
         ${sym.slice(-10).reverse().map((x) => `<tr><td class="mono">${fmtDate(x.date)}</td><td class="num">${x.pain}</td><td class="num">${x.fatigue ?? "–"}</td><td class="num">${x.mood ?? "–"}/5</td><td class="num">${x.sleep ?? "–"}/5</td><td>${h(x.note ?? "")}</td></tr>`).join("")}
       </tbody></table></div>` : ""}
     </section>
+  </div>`;
+}
+
+/* ================= 내원기록 ================= */
+const visitLinked = (a) => cache.visits.some((v) => v.appointmentId === a.id);
+
+/** 치료 항목 하나: 체크하면 아래 세부 칸이 열린다 (CSS :has) */
+function treatmentRow(t, prev) {
+  const on = Boolean(prev);
+  const fld = (f) => {
+    const name = `${t.code}.${f}`, val = prev?.[f] ?? "";
+    const label = f === "level" ? levelLabelOf(t) : FIELDS[f].label;
+    const opts = f === "level" ? levelsOf(t) : FIELDS[f].options;
+    const input = FIELDS[f].type === "select"
+      ? `<select name="${name}"><option value="">–</option>${opts.map(([k, l]) => `<option value="${k}" ${String(val) === k ? "selected" : ""}>${l}</option>`).join("")}</select>`
+      : `<input type="number" name="${name}" min="0" max="${FIELDS[f].max}" step="${FIELDS[f].step}" inputmode="decimal" value="${val}">`;
+    return `<label class="vi-f"><span class="small muted">${label}</span>${input}</label>`;
+  };
+  return `<div class="vi">
+    <label class="chk"><input type="checkbox" class="vi-on" name="t" value="${t.code}" ${on ? "checked" : ""}><span>${h(t.label)}</span></label>
+    <div class="vi-detail">${[...t.fields, "response"].map(fld).join("")}
+      <label class="vi-f vi-how"><span class="small muted">방법·메모</span><input type="text" name="${t.code}.how" maxlength="200" value="${h(prev?.how ?? "")}" placeholder="예: 팔꿈치 90도 유지, 테이블 지지"></label></div>
+  </div>`;
+}
+
+function visitForm(p) {
+  const prefill = state.visitPrefill ? cache.visits.find((v) => v.id === state.visitPrefill) : null;
+  const byCode = Object.fromEntries((prefill?.items ?? []).map((it) => [it.code, it]));
+  const appts = view.appointments(p.id).filter((a) => a.date <= localDate() && a.date >= localDate(new Date(Date.now() - 30 * DAY)) && a.status !== "cancelled" && !visitLinked(a)).reverse();
+  const pick = state.visitAppt && appts.some((a) => a.id === state.visitAppt) ? state.visitAppt : appts.find((a) => a.date === localDate())?.id ?? "";
+  const picked = appts.find((a) => a.id === pick);
+  const last = view.visits(p.id)[0];
+  return `<form id="f-visit" class="panel visitform">
+    <div class="toolbar" style="justify-content:space-between"><h2>내원기록 작성</h2>
+      ${last ? `<button type="button" class="btn sm ghost" data-act="visit-copy" data-id="${last.id}">지난 기록(${fmtDate(last.date)}) 불러오기</button>` : ""}</div>
+    ${prefill ? `<p class="small muted">${fmtDate(prefill.date)} 기록의 치료 항목과 값을 불러왔습니다. 오늘 한 대로 고쳐 저장하세요. <button type="button" class="linklike" data-act="visit-clear">비우기</button></p>` : ""}
+    <div class="formgrid">
+      <div class="field"><label class="label" for="vs-date">내원일</label><input type="date" id="vs-date" value="${picked?.date ?? localDate()}" max="${localDate()}" required></div>
+      <div class="field"><label class="label" for="vs-appt">연결할 일정</label><select id="vs-appt"><option value="">연결 안 함</option>${appts.map((a) => `<option value="${a.id}" ${a.id === pick ? "selected" : ""}>${fmtDay(a.startsAt)} ${fmtTime(a.startsAt)} ${KIND[a.kind]}${a.status === "scheduled" ? " (저장하면 완료 처리)" : ""}</option>`).join("")}</select></div>
+      <div class="field"><label class="label" for="vs-dur">치료 시간(분)</label><input type="number" id="vs-dur" min="1" max="480" inputmode="numeric" value="${prefill?.duration ?? picked?.duration ?? 30}"></div>
+    </div>
+    <fieldset class="vgroup"><legend>한 치료 <span class="small muted">체크하면 무게·세트·횟수·도움 수준 같은 세부 칸이 열립니다</span></legend>
+      ${GROUPS.map(([g, label]) => `<div class="vcat"><h3>${label}</h3>${TREATMENTS.filter((t) => t.group === g).map((t) => treatmentRow(t, byCode[t.code])).join("")}</div>`).join("")}
+    </fieldset>
+    <fieldset class="vgroup"><legend>관찰·특이사항</legend>
+      <div class="chkgrid">${OBSERVATIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" name="obs" value="${k}" ${prefill?.observations.includes(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>
+    </fieldset>
+    <div class="field"><label class="label" for="vs-note">메모 (선택)</label><textarea id="vs-note" rows="2" maxlength="2000" placeholder="체크리스트에 없는 치료나 특이사항. 환자·보호자 앱에도 보입니다.">${h(prefill?.note ?? "")}</textarea></div>
+    <div class="toolbar"><button class="btn primary" type="submit">내원기록 저장</button><span class="small muted">저장한 기록은 SOAP 초안의 O(객관적) 칸에 자동으로 들어갑니다.</span></div>
+  </form>`;
+}
+
+/** 치료별 변화: 같은 치료의 첫 기록과 최근 기록 비교 */
+function progressTable(vs) {
+  const rows = new Map();
+  for (const v of [...vs].reverse()) for (const it of v.items) {
+    const r = rows.get(it.code) ?? { n: 0, first: null, last: null };
+    r.n++; r.first ??= { ...it, date: v.date }; r.last = { ...it, date: v.date };
+    rows.set(it.code, r);
+  }
+  if (!rows.size) return "";
+  const dose = (it) => itemSummary({ ...it, how: undefined }, "soap").split(" — ")[1] ?? "–";
+  return `<section class="panel"><h2>치료별 변화</h2><div class="tablewrap"><table><thead><tr><th>치료</th><th class="num">횟수</th><th>처음</th><th>최근</th></tr></thead><tbody>
+    ${[...rows].sort((a, b) => b[1].n - a[1].n).map(([code, r]) => `<tr><td>${h(treatment(code)?.label ?? code)}</td><td class="num">${r.n}</td><td class="small"><span class="mono">${fmtDate(r.first.date)}</span> ${h(dose(r.first))}</td><td class="small"><span class="mono">${fmtDate(r.last.date)}</span> ${h(dose(r.last))}</td></tr>`).join("")}
+  </tbody></table></div></section>`;
+}
+
+function tVisits(p) {
+  const vs = view.visits(p.id);
+  const appt = (id) => cache.appointments.find((a) => a.id === id);
+  return `${visitForm(p)}
+  <div class="grid2">
+    <section class="panel"><h2>내원기록 ${vs.length}건</h2>
+      ${vs.length ? vs.map((v) => `<article class="visit">
+        <div class="toolbar" style="justify-content:space-between"><strong class="mono">${h(v.date)}</strong>
+          <span class="toolbar" style="gap:.3rem">${v.duration ? `<span class="pill plain">${v.duration}분</span>` : ""}${appt(v.appointmentId) ? `<span class="pill plain">${KIND[appt(v.appointmentId).kind]}</span>` : ""}<button class="btn sm ghost" data-act="del-visit" data-id="${v.id}">삭제</button></span></div>
+        <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it))}</li>`).join("")}</ul>
+        ${v.observations.length ? `<div class="flags">${v.observations.map((k) => `<span class="pill ${["fall_risk", "dizzy", "skin", "pain", "early_stop"].includes(k) ? "warn" : "plain"}">${h(observation(k))}</span>`).join("")}</div>` : ""}
+        ${v.note ? `<p class="small">${h(v.note)}</p>` : ""}
+      </article>`).join("") : `<p class="muted small">아직 내원기록이 없습니다. 위에서 오늘 한 치료를 체크해 저장하세요.</p>`}
+    </section>
+    ${progressTable(vs) || `<section class="panel"><h2>치료별 변화</h2><p class="muted small">내원기록이 쌓이면 치료마다 무게·횟수·도움 수준이 어떻게 바뀌었는지 보여 줍니다.</p></section>`}
   </div>`;
 }
 

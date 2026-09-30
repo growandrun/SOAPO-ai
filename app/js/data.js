@@ -11,7 +11,7 @@ export const configured = Boolean(cfg.supabaseUrl && cfg.supabaseKey);
 // supabase-js는 vendor/ 폴더에 고정 버전으로 들어 있다 (index.html에서 먼저 로드 → window.supabase)
 export const sb = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: true, detectSessionInUrl: true } }) : null;
 
-const empty = () => ({ profile: null, patients: [], notes: [], programs: [], sessions: [], messages: [], appointments: [], symptoms: [], reads: {}, names: {}, myLatest: null });
+const empty = () => ({ profile: null, patients: [], notes: [], programs: [], sessions: [], messages: [], appointments: [], symptoms: [], visits: [], reads: {}, names: {}, myLatest: null });
 export const cache = empty();
 export function clearCache() { Object.assign(cache, empty()); }
 
@@ -39,6 +39,7 @@ const mapNote = (n) => ({ id: n.id, patientId: n.patient_id, date: n.session_dat
 const mapProgram = (x) => ({ id: x.id, patientId: x.patient_id, title: x.title, detail: x.instructions, target: x.target_count, unit: x.unit, perDay: x.per_day, camera: x.camera_metric, targetAngle: x.target_angle ?? 90 });
 const mapSession = (x) => ({ id: x.id, patientId: x.patient_id, programId: x.program_id, at: x.performed_at, date: localDate(new Date(x.performed_at)), reps: x.reps, maxAngle: x.max_angle, pain: x.pain, comment: x.comment, source: x.source });
 const mapAppt = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, startsAt: x.starts_at, date: localDate(new Date(x.starts_at)), duration: x.duration_min, kind: x.kind, status: x.status, note: x.note });
+const mapVisit = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
 const mapSymptom = (x) => ({ id: x.id, patientId: x.patient_id, date: x.logged_on, pain: x.pain, fatigue: x.fatigue, mood: x.mood, sleep: x.sleep, note: x.note });
 function mapPatient(x) {
   return { id: x.id, name: x.name, age: x.birth_year ? new Date().getFullYear() - x.birth_year : null, birthYear: x.birth_year, sex: x.sex, diagnosis: x.diagnosis, onset: x.onset_date,
@@ -59,6 +60,7 @@ export const view = {
   sessions: (pid) => cache.sessions.filter((x) => x.patientId === pid),
   messages: (pid) => cache.messages.filter((m) => m.patientId === pid),
   appointments: (pid) => cache.appointments.filter((x) => x.patientId === pid).sort(byTime),
+  visits: (pid) => cache.visits.filter((x) => x.patientId === pid).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)),
   symptoms: (pid) => cache.symptoms.filter((x) => x.patientId === pid).sort((a, b) => a.date.localeCompare(b.date)),
   /** 다음 예정된 치료 (지금 이후, 예정 상태) */
   nextAppointment(pid) { const now = new Date().toISOString(); return this.appointments(pid).find((x) => x.status === "scheduled" && x.startsAt >= now) ?? null; },
@@ -67,7 +69,7 @@ export const view = {
     const since = cache.reads[pid] ?? "";
     return this.messages(pid).filter((m) => m.senderId !== cache.profile?.id && m.at > since).length;
   },
-  ctx(pid) { return { programs: this.programs(pid), sessions: this.sessions(pid), notes: this.notes(pid), messages: this.messages(pid), appointments: this.appointments(pid), symptoms: this.symptoms(pid) }; },
+  ctx(pid) { return { programs: this.programs(pid), sessions: this.sessions(pid), notes: this.notes(pid), messages: this.messages(pid), appointments: this.appointments(pid), symptoms: this.symptoms(pid), visits: this.visits(pid) }; },
 };
 
 export async function loadProfile(userId) {
@@ -81,7 +83,7 @@ export async function loadAll() {
   const apptFrom = new Date(Date.now() - 30 * DAY).toISOString();
   const apptTo = new Date(Date.now() + 90 * DAY).toISOString();
   const isT = cache.profile.role === "therapist";
-  const [pa, go, as, no, pr, se, me, pf, latest, ap, sy, rd] = await Promise.all([
+  const [pa, go, as, no, pr, se, me, pf, latest, ap, sy, rd, vi] = await Promise.all([
     sb.from("patients").select("*").order("created_at"),
     sb.from("goals").select("*").order("created_at"),
     sb.from("assessments").select("*").order("measured_on"),
@@ -94,6 +96,7 @@ export async function loadAll() {
     sb.from("appointments").select("*").gte("starts_at", apptFrom).lte("starts_at", apptTo).order("starts_at"),
     sb.from("symptom_logs").select("*").gte("logged_on", localDate(new Date(Date.now() - 60 * DAY))).order("logged_on"),
     sb.from("thread_reads").select("*"),
+    sb.from("visits").select("*").order("visited_on", { ascending: false }).limit(300),
   ]);
   cache.patients = must(pa).map(mapPatient);
   for (const g of must(go)) view.patient(g.patient_id)?.goals.push(mapGoal(g));
@@ -108,6 +111,7 @@ export async function loadAll() {
   cache.appointments = must(ap).map(mapAppt);
   cache.symptoms = must(sy).map(mapSymptom);
   cache.reads = Object.fromEntries(must(rd).map((x) => [x.patient_id, x.last_read_at]));
+  cache.visits = must(vi).map(mapVisit);
 }
 
 /* ---------- 로그인 ---------- */
@@ -181,6 +185,17 @@ export async function addAppointment(a) {
 export async function setAppointmentStatus(id, status) {
   must(await sb.from("appointments").update({ status }).eq("id", id));
   const a = cache.appointments.find((x) => x.id === id); if (a) a.status = status;
+}
+/** 내원기록 저장. 연결한 일정이 아직 '예정'이면 '완료'로 바꾼다 */
+export async function addVisit(v) {
+  const row = must(await sb.from("visits").insert({ patient_id: v.patientId, appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null }).select().single());
+  cache.visits.push(mapVisit(row));
+  const a = cache.appointments.find((x) => x.id === v.appointmentId);
+  if (a && a.status === "scheduled") await setAppointmentStatus(a.id, "done");
+}
+export async function deleteVisit(id) {
+  must(await sb.from("visits").delete().eq("id", id));
+  cache.visits = cache.visits.filter((x) => x.id !== id);
 }
 export async function saveSymptom(s) {
   const row = must(await sb.from("symptom_logs").upsert({ patient_id: s.patientId, logged_on: s.date, pain: s.pain, fatigue: s.fatigue, mood: s.mood, sleep: s.sleep, note: s.note || null }, { onConflict: "patient_id,logged_on" }).select().single());

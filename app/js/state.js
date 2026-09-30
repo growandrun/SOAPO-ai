@@ -9,6 +9,7 @@ export const state = {
   // 치료사
   tView: "dashboard",      // dashboard | patient | new
   selected: null, tab: "overview", draft: null, draftUsedAI: false,
+  visitAppt: null, visitPrefill: null,   // 내원기록: 연결할 일정, 불러온 지난 기록
   // 환자
   ptab: "home", editSymptom: false,
 };

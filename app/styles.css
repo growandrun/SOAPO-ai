@@ -294,3 +294,27 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .pinfo { margin-top: -.25rem; }
 .pinfo summary { color: var(--ink-soft); cursor: pointer; }
 .pinfo form { max-width: 40rem; }
+
+/* 내원기록: 체크리스트 + 체크한 항목의 세부 칸 */
+.visitform { display: grid; gap: 1rem; }
+.vgroup { border: 1px solid var(--line); border-radius: var(--r); padding: .8rem 1rem 1rem; margin: 0; display: grid; gap: .8rem; min-width: 0; }
+.vgroup legend { font-weight: 700; padding: 0 .3rem; }
+.vgroup legend .small { font-weight: 400; margin-left: .3rem; }
+.vcat { display: grid; gap: .2rem; }
+.vcat h3 { font-size: .8rem; color: var(--ink-soft); margin: .2rem 0 .1rem; letter-spacing: .02em; }
+.vcat { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); column-gap: .6rem; }
+.vcat h3 { grid-column: 1 / -1; }
+.vi { border-radius: 8px; padding: .15rem .4rem; min-width: 0; }
+.vi:has(.vi-on:checked) { grid-column: 1 / -1; background: var(--accent-soft); padding: .45rem .6rem .6rem; }
+.chk { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; cursor: pointer; min-height: 2rem; }
+.chk input { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); flex: none; margin: 0; }
+.vi:has(.vi-on:checked) > .chk { font-weight: 600; color: var(--accent); }
+.vi-detail { display: none; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .45rem .6rem; margin-top: .3rem; }
+.vi:has(.vi-on:checked) .vi-detail { display: grid; }
+.vi-f { display: grid; gap: .15rem; min-width: 0; }
+.vi-f select, .vi-f input { width: 100%; background: var(--surface); }
+.vi-how { grid-column: 1 / -1; }
+.chkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); column-gap: .6rem; }
+.visit { border-top: 1px solid var(--line); padding-top: .8rem; display: grid; gap: .45rem; }
+.visit:first-of-type { border-top: 0; padding-top: 0; }
+.vitems { margin: 0; padding-left: 1.1rem; display: grid; gap: .2rem; font-size: .9rem; }

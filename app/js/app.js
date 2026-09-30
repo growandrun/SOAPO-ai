@@ -132,15 +132,23 @@ document.addEventListener("click", async (e) => {
       case "t-dashboard": Object.assign(state, { tView: "dashboard", selected: null }); return render();
       case "new-patient": state.tView = "new"; return render();
       case "pick":
-        if (state.selected !== b.dataset.id) { state.draft = null; state.tab = "overview"; }
+        if (state.selected !== b.dataset.id) Object.assign(state, { draft: null, tab: "overview", visitAppt: null, visitPrefill: null });
         Object.assign(state, { tView: "patient", selected: b.dataset.id });
         if (state.tab === "msg") openThread(b.dataset.id);
         window.scrollTo({ top: 0 });
         return render();
-      case "tab": state.tab = b.dataset.tab; if (state.tab === "msg") openThread(state.selected); return render();
+      case "tab": state.tab = b.dataset.tab; state.visitPrefill = null; if (state.tab === "msg") openThread(state.selected); return render();
       case "write-soap":
         Object.assign(state, { tView: "patient", selected: b.dataset.id, tab: "soap", draft: { patientId: b.dataset.id, date: b.dataset.date, s: "", o: "", a: "", p: "" }, draftUsedAI: false });
         return render();
+      case "write-visit":
+        Object.assign(state, { tView: "patient", selected: b.dataset.id, tab: "visits", visitAppt: b.dataset.appt ?? null, visitPrefill: null });
+        window.scrollTo({ top: 0 }); return render();
+      case "visit-copy": state.visitPrefill = b.dataset.id; return render();
+      case "visit-clear": state.visitPrefill = null; return render();
+      case "del-visit":
+        if (!confirm("이 내원기록을 삭제할까요? 되돌릴 수 없습니다.")) return;
+        await run(b, () => D.deleteVisit(b.dataset.id)); toast("내원기록을 삭제했습니다"); return render();
       case "appt-status": {
         await run(b, () => D.setAppointmentStatus(b.dataset.id, b.dataset.status));
         toast({ done: "완료로 표시했습니다", no_show: "결석으로 표시했습니다", cancelled: "취소했습니다" }[b.dataset.status]); return render();
@@ -152,7 +160,7 @@ document.addEventListener("click", async (e) => {
       case "goal-met": await run(b, () => D.setGoalStatus(p.id, b.dataset.id, "met")); toast("목표를 달성으로 표시했습니다"); return render();
       case "stop-prog": await run(b, () => D.stopProgram(b.dataset.id)); toast("환자 앱에서 이 운동을 내렸습니다"); return render();
       case "ai-draft": {
-        const dr = AI.draftNote(p, view.ctx(p.id));
+        const dr = AI.draftNote(p, { ...view.ctx(p.id), date: state.draft.date });
         const empty = ["s", "o", "a", "p"].every((k) => !state.draft[k].trim());
         for (const k of ["s", "o", "a", "p"]) if (!state.draft[k].trim()) state.draft[k] = dr[k];
         state.draftUsedAI = true;
@@ -275,6 +283,21 @@ document.addEventListener("submit", async (e) => {
         if (Number.isNaN(startsAt.getTime())) return toast("날짜와 시간을 확인해 주세요", "error");
         await run(btn, () => D.addAppointment({ patientId: v("ap-patient"), startsAt: startsAt.toISOString(), duration: parseInt(v("ap-dur")) || 30, kind: v("ap-kind"), note: v("ap-note") }));
         toast("일정을 추가했습니다"); return render();
+      }
+      case "f-visit": {
+        const num = (name) => { const x = f.elements[name]?.value.trim(); if (!x) return undefined; const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+        const str = (name) => f.elements[name]?.value.trim() || undefined;
+        const items = [...f.querySelectorAll("input[name=t]:checked")].map((c) => {
+          const code = c.value;
+          return JSON.parse(JSON.stringify({ code, side: str(`${code}.side`), level: str(`${code}.level`), weight: num(`${code}.weight`), sets: num(`${code}.sets`), reps: num(`${code}.reps`), minutes: num(`${code}.minutes`), assist: str(`${code}.assist`), response: str(`${code}.response`), how: str(`${code}.how`) })); // undefined 칸은 빼고 저장
+        });
+        const observations = [...f.querySelectorAll("input[name=obs]:checked")].map((c) => c.value);
+        const note = v("vs-note");
+        if (!items.length && !note) return toast("한 치료를 하나 이상 체크하거나 메모를 적어 주세요", "error");
+        await run(btn, () => D.addVisit({ patientId: p.id, appointmentId: v("vs-appt"), date: v("vs-date") || localDate(), duration: num("vs-dur") || null, items, observations, note }));
+        Object.assign(state, { visitAppt: null, visitPrefill: null });
+        window.scrollTo({ top: 0 });
+        toast(`내원기록을 저장했습니다 (치료 ${items.length}가지)`); return render();
       }
       case "f-goal": {
         await run(btn, () => D.addGoal(p.id, { type: v("g-type"), text: v("g-text"), due: v("g-due") }));

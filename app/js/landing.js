@@ -20,7 +20,7 @@ export function landingHtml() {
         <button class="btn primary lg" data-act="go-auth" data-mode="patient">환자·보호자로 시작하기</button>
         <button class="btn lg" data-act="go-auth" data-mode="therapist">작업치료사로 시작하기</button>
       </div>
-      <p class="small muted">비밀번호 없이 이메일로 가입합니다. 이미 가입했다면 <button class="linklike" data-act="go-auth" data-mode="login">로그인</button>하세요.</p>
+      <p class="small muted">이메일과 비밀번호로 가입합니다. 이미 가입했다면 <button class="linklike" data-act="go-auth" data-mode="login">로그인</button>하세요.</p>
     </div>
     <figure class="hero-note" aria-label="SOAP 노트 예시">
       <div class="hn-head"><span class="mono small">9/30 · 박○○ · 우측 편마비</span><span class="pill ok">서명 완료</span></div>
@@ -121,7 +121,7 @@ function authBody() {
         </div>`;
     case "code-email":
       return `<form class="card" id="f-code-email">
-          <h2>메일 코드로 로그인</h2><p class="small muted">비밀번호 없이, 메일로 받은 코드나 링크로 로그인합니다. 이미 가입한 이메일만 쓸 수 있습니다.</p>
+          <h2>메일 코드로 로그인</h2><p class="small muted">메일로 받은 코드나 링크로 로그인합니다. 이미 가입한 이메일만 쓸 수 있습니다.</p>
           ${email}
           <button class="btn primary" type="submit">로그인 메일 받기</button>
           <button type="button" class="linklike" data-act="auth-step" data-step="form">비밀번호로 로그인</button>

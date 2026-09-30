@@ -6,6 +6,7 @@ import { h, localDate, fmtDate, DAY } from "./util.js";
 import { lineChart, ring } from "./charts.js";
 import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday } from "./layout.js";
 import { threadHtml, composer } from "./therapist.js";
+import { itemSummary } from "./catalog.js";
 
 export const MOOD = ["", "매우 나쁨", "나쁨", "보통", "좋음", "매우 좋음"];
 export const SLEEP = ["", "거의 못 잠", "자주 깸", "보통", "잘 잠", "푹 잠"];
@@ -121,6 +122,11 @@ function recordsHtml(p) {
     </section>
     ${kSeries.length ? `<section class="panel chart"><h2>일상생활 점수 변화</h2>${lineChart(kSeries, { max: 100, label: "K-MBI 추이" })}</section>` : ""}
     <section class="panel chart"><h2>통증 기록</h2>${pains.length ? lineChart(pains, { max: 10, unit: "", label: "통증 추이", invert: true }) : `<p class="muted small">홈에서 매일 컨디션을 기록하면 그래프가 그려져요.</p>`}</section>
+    ${ctx.visits.length ? `<section class="panel"><h2>치료실에서 한 운동과 훈련</h2>${ctx.visits.slice(0, 6).map((v) => `<article class="visit">
+        <strong class="mono">${fmtDate(v.date)}${v.duration ? ` <span class="small muted">· ${v.duration}분</span>` : ""}</strong>
+        <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it, "plain"))}</li>`).join("")}</ul>
+        ${v.note ? `<p class="small muted">${h(v.note)}</p>` : ""}</article>`).join("")}
+      <p class="small muted">집에서도 같은 운동을 할 때는 치료사가 처방한 무게와 횟수를 넘기지 마세요.</p></section>` : ""}
     ${past.length ? `<section class="panel"><h2>지난 치료</h2><ul class="appts">${past.map((a) => `<li class="appt"><span class="mono appt-time">${fmtDay(a.startsAt)}</span><span class="appt-who">${KIND[a.kind]}</span><span class="appt-act"><span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span></span></li>`).join("")}</ul></section>` : ""}`;
 }
 

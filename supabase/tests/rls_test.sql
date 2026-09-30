@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(44);
+select plan(51);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -27,6 +27,11 @@ select lives_ok($$ insert into patients (therapist_id, name) values (auth.uid(),
 select matches((select reissue_invite(id) from patients where name = '코드재발급환자'), '^SOAP-[0-9A-F]{6}$', '초대 코드 재발급');
 
 select lives_ok($$ insert into appointments (patient_id, starts_at, kind) select id, now() + interval '1 day', 'session' from patients where name = '테스트환자' $$, '치료사가 치료 일정 추가');
+select lives_ok($$ insert into visits (patient_id, appointment_id, visited_on, duration_min, items, observations)
+  select p.id, a.id, current_date, 30, '[{"code":"dumbbell","side":"R","weight":2,"sets":3,"reps":10},{"code":"eating","assist":"MinA","minutes":15}]', '{guardian,pain}'
+  from patients p join appointments a on a.patient_id = p.id where p.name = '테스트환자' $$, '치료사가 내원기록 저장 (치료 항목·체크리스트)');
+select throws_ok($$ insert into visits (patient_id, visited_on, items) select id, current_date, '{"code":"x"}' from patients where name = '테스트환자' $$, '23514', null, '치료 항목은 배열이어야 함');
+select throws_ok($$ insert into visits (patient_id, appointment_id, visited_on) select p.id, a.id, current_date from patients p, appointments a where p.name = '코드재발급환자' $$, '42501', null, '다른 환자의 일정에 내원기록을 연결할 수 없음');
 
 -- 이후 테스트에서 쓸 환자 id와 초대 코드 (관리자 권한으로 조회)
 reset role;
@@ -43,6 +48,8 @@ select is((select count(*) from soap_notes), 0::bigint, '다른 치료사의 SOA
 select throws_ok($$ insert into goals (patient_id, type, text) values (current_setting('test.pid')::uuid, 'STG', 'x') $$, '42501', null, '남의 환자 id를 알아도 목표 추가 불가');
 select throws_ok($$ insert into appointments (patient_id, starts_at) values (current_setting('test.pid')::uuid, now()) $$, '42501', null, '남의 환자에 일정 추가 불가');
 select is((select count(*) from appointments), 0::bigint, '다른 치료사의 일정은 안 보임');
+select throws_ok($$ insert into visits (patient_id, visited_on) values (current_setting('test.pid')::uuid, current_date) $$, '42501', null, '남의 환자에 내원기록 추가 불가');
+select is((select count(*) from visits), 0::bigint, '다른 치료사의 내원기록은 안 보임');
 select lives_ok($$ update patients set birth_date = '2000-01-01' where id = current_setting('test.pid')::uuid $$, '다른 치료사의 수정 시도 (적용되는 행 없음)');
 
 -- ── 환자 p1: 초대 코드로 가입 ────────────────────────────────
@@ -58,6 +65,8 @@ select lives_ok($$ insert into messages (patient_id, body) select id, '어깨가
 select throws_ok($$ insert into messages (patient_id, body, sender_id) select id, '사칭', '00000000-0000-0000-0000-0000000000a1' from patients $$, '42501', null, '보낸 사람을 다른 사람으로 바꿀 수 없음');
 select is((select count(*) from appointments), 1::bigint, '환자는 본인 치료 일정을 봄');
 select throws_ok($$ insert into appointments (patient_id, starts_at) select id, now() from patients $$, '42501', null, '환자는 일정을 만들 수 없음');
+select is((select jsonb_array_length(items) from visits), 2, '환자는 본인 내원기록(치료 항목)을 봄');
+select throws_ok($$ insert into visits (patient_id, visited_on) select id, current_date from patients $$, '42501', null, '환자는 내원기록을 만들 수 없음');
 select lives_ok($$ insert into symptom_logs (patient_id, logged_on, pain, mood) select id, current_date, 3, 4 from patients $$, '환자가 오늘 컨디션 기록');
 select lives_ok($$ insert into symptom_logs (patient_id, logged_on, pain, mood) select id, current_date, 5, 3 from patients on conflict (patient_id, logged_on) do update set patient_id = excluded.patient_id, logged_on = excluded.logged_on, pain = excluded.pain, mood = excluded.mood $$, '같은 날 컨디션은 덮어쓰기 (API upsert와 같은 형태)');
 select is((select pain from symptom_logs), 5, '덮어쓴 통증 값');
