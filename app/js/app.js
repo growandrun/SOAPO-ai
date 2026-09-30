@@ -218,9 +218,13 @@ document.addEventListener("submit", async (e) => {
         return;
       }
       case "f-patient": {
-        const np = await run(btn, () => D.createPatient({ name: v("np-name"), firstVisit: v("np-visit") }));
+        const np = await run(btn, () => D.createPatient({ name: v("np-name"), birthDate: v("np-birth"), firstVisit: v("np-visit") }));
         Object.assign(state, { selected: np.id, tView: "patient", tab: "overview" });
         toast(`등록했습니다. 초대 코드: ${np.invite}`); return render();
+      }
+      case "f-pinfo": {
+        await run(btn, () => D.updatePatient(p.id, { name: v("pi-name"), birthDate: v("pi-birth"), firstVisit: v("pi-visit") }));
+        toast("기본 정보를 저장했습니다"); return render();
       }
       case "f-appt": {
         const startsAt = new Date(`${v("ap-date")}T${v("ap-time")}`);

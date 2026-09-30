@@ -17,6 +17,16 @@ export function dday(dateStr) {
   return n === 0 ? "오늘" : n === 1 ? "내일" : n > 0 ? `${n}일 뒤` : `${-n}일 지남`;
 }
 
+/** 만 나이 (한국 공식 나이) */
+export function manAge(birth) {
+  const b = new Date(birth + "T00:00:00"), t = new Date();
+  let a = t.getFullYear() - b.getFullYear();
+  if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--;
+  return a;
+}
+/** "1958.03.12 · 만 68세" */
+export const fmtBirth = (birth) => birth ? `${birth.replaceAll("-", ".")} · 만 ${manAge(birth)}세` : "";
+
 export function topbar() {
   const p = cache.profile;
   const who = p.role === "therapist" ? "치료사용" : p.relation === "guardian" ? "보호자용" : "환자용";

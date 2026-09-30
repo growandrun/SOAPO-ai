@@ -24,11 +24,13 @@ await fetch(`${MAIL}/api/v1/messages`, { method: 'DELETE' });
 const b = await chromium.launch();
 const errs = [];
 const mk = async (name, vp) => { const c = await b.newContext({ ignoreHTTPSErrors: true, viewport: vp, colorScheme: process.env.DARK ? 'dark' : 'light' }); const p = await c.newPage();
+  if (process.env.SHOTS) await c.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort()); // 캡처가 글꼴을 기다리지 않게
   p.on('pageerror', (e) => errs.push(`${name} pageerror: ${e.message}`)); p.on('console', (m) => m.type() === 'error' && errs.push(`${name}: ${m.text()}`)); return p; };
 const T = await mk('T', { width: 1280, height: 900 }), P = await mk('P', { width: 390, height: 844 });
 const step = (s) => console.log('✓', s);
 // SHOTS=폴더 를 주면 주요 화면을 캡처한다
-const shot = async (pg, name) => { if (process.env.SHOTS) await pg.screenshot({ path: `${process.env.SHOTS}/${name}.png`, fullPage: true }); };
+// 캡처는 웹 글꼴을 기다리다 멈출 수 있어(글꼴 차단 환경), 실패해도 테스트를 막지 않게 한다
+const shot = async (pg, name) => { if (!process.env.SHOTS) return; try { await pg.screenshot({ path: `${process.env.SHOTS}/${name}.png`, fullPage: true, timeout: 10000 }); } catch { console.log(`  (캡처 건너뜀: ${name})`); } };
 const text = async (pg, sel) => (await pg.textContent(sel)).replace(/\s+/g, ' ').trim();
 
 // ── 홈페이지 → 치료사 가입 (메일 링크) ──
@@ -43,8 +45,10 @@ step('메일 링크 → 가입 마무리 (치료사 미리 선택됨)');
 await T.fill('#ob-name', '김하늘'); await T.fill('#ob-license', '제12345호'); await T.check('#ob-consent'); await T.click('#f-onboard button[type=submit]');
 await T.waitForSelector('#f-patient'); step('치료사 가입 → 첫 환자 등록 화면');
 await shot(T, '0-register'); if (await T.$('#np-dx')) throw new Error('등록 화면에 의료 정보 칸이 남아 있음');
-await T.fill('#np-name', '박영수'); await T.fill('#np-visit', localDate); await T.click('#f-patient button[type=submit]');
-await T.waitForSelector('.phead h1'); if (!(await text(T, '.phead')).includes('첫 내원')) throw new Error('첫 내원일 표시 없음'); const invite = (await T.textContent('.phead b.mono')).trim(); step(`환자 등록, 초대 코드 ${invite}`);
+await T.fill('#np-name', '박영수'); await T.fill('#np-birth', '1958-03-12'); await T.fill('#np-visit', localDate); await T.click('#f-patient button[type=submit]');
+await T.waitForSelector('.phead h1'); if (!(await text(T, '.phead')).includes('첫 내원')) throw new Error('첫 내원일 표시 없음');
+if (!/1958\.03\.12 · 만 \d+세/.test(await text(T, '.rail'))) throw new Error('환자 목록에 생년월일·만 나이 없음');
+await T.click('.pinfo summary'); await T.fill('#pi-birth', '1958-03-13'); await T.click('#f-pinfo button[type=submit]'); await T.waitForFunction(() => document.querySelector('.rail').textContent.includes('1958.03.13')); const invite = (await T.textContent('.phead b.mono')).trim(); step(`환자 등록, 초대 코드 ${invite}`);
 await T.click('details:has(#f-goal) summary'); await T.fill('#g-text', '변형 숟가락을 사용하여 식사를 2주 이내에 수정된 독립(Mod I) 수준으로 수행한다.'); await T.fill('#g-due', localDate); await T.click('#f-goal button[type=submit]');
 await T.waitForSelector('.goals li');
 for (const [v, d] of [['48', '2026-09-16'], ['55', '2026-09-23']]) { await T.click('details:has(#f-score) summary'); await T.fill('#sc-value', v); await T.fill('#sc-date', d); await T.click('#f-score button[type=submit]'); await T.waitForTimeout(400); }
@@ -107,6 +111,7 @@ if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환
 step('환자 내 기록: 점수·통증 그래프·치료사 평가');
 await P.click('[data-act=logout]'); await P.waitForSelector('.hero'); step('로그아웃 → 홈페이지');
 await b.close();
-const unexpected = errs.filter((e) => !/초대 코드|400 \(Bad Request\)|ERR_TOO_MANY_RETRIES|ERR_CERT|net::ERR/.test(e));
+// 실시간 연결은 끊기면 자동으로 다시 연결된다. 실제로 안 되면 위의 "실시간 도착" 단계가 실패한다.
+const unexpected = errs.filter((e) => !/초대 코드|400 \(Bad Request\)|ERR_TOO_MANY_RETRIES|ERR_CERT|net::ERR|WebSocket connection to/.test(e));
 if (unexpected.length) { console.error('예상하지 못한 오류:', unexpected); process.exit(1); }
 console.log('모든 단계 통과');

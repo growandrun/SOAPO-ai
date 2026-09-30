@@ -291,3 +291,6 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .hero .label { background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .aud:first-child { border-top-color: var(--brand-violet); }
 .aud:last-child { border-top-color: var(--brand-pink); }
+.pinfo { margin-top: -.25rem; }
+.pinfo summary { color: var(--ink-soft); cursor: pointer; }
+.pinfo form { max-width: 40rem; }

@@ -4,7 +4,7 @@ import * as AI from "./ai.js";
 import { state } from "./state.js";
 import { h, localDate, fmtDate, DAY } from "./util.js";
 import { lineChart, spark } from "./charts.js";
-import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday } from "./layout.js";
+import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday, fmtBirth } from "./layout.js";
 
 const LEVEL_ORDER = { danger: 0, warn: 1, info: 2 };
 const plusDays = (n) => localDate(new Date(Date.now() + n * DAY));
@@ -27,7 +27,8 @@ export function railHtml() {
     const d = al.filter((y) => y.level === "danger").length, w = al.filter((y) => y.level === "warn").length;
     const un = view.unread(x.id);
     return `<button class="pitem" data-act="pick" data-id="${x.id}" aria-current="${state.tView === "patient" && x.id === state.selected}">
-      <div class="row"><strong>${h(x.name)}</strong>${x.firstVisit ? `<span class="small muted mono">내원 ${fmtDate(x.firstVisit)}</span>` : ""}</div>
+      <div class="row"><strong>${h(x.name)}</strong></div>
+      <span class="small muted mono">${x.birthDate ? fmtBirth(x.birthDate) : "생년월일 미입력"}</span>
       <div class="flags">${d ? `<span class="pill danger">위험 ${d}</span>` : ""}${w ? `<span class="pill warn">주의 ${w}</span>` : ""}${!d && !w ? `<span class="pill ok">양호</span>` : ""}${un ? `<span class="pill info">메시지 ${un}</span>` : ""}${x.userId ? "" : `<span class="pill plain">앱 미가입</span>`}</div>
     </button>`; }).join("")}</div>`;
 }
@@ -113,7 +114,7 @@ function caseloadTable() {
     const goalsActive = p.goals.filter((g) => g.status === "active").length, goalsMet = p.goals.filter((g) => g.status === "met").length;
     const un = view.unread(p.id);
     return `<tr>
-      <td><button class="linklike" data-act="pick" data-id="${p.id}"><b>${h(p.name)}</b></button>${p.firstVisit ? `<div class="small muted">내원 ${fmtDate(p.firstVisit)}</div>` : ""}</td>
+      <td><button class="linklike" data-act="pick" data-id="${p.id}"><b>${h(p.name)}</b></button>${p.birthDate ? `<div class="small muted mono">${fmtBirth(p.birthDate)}</div>` : ""}</td>
       <td class="num">${st.adherence == null ? `<span class="muted">처방 없음</span>` : `<span class="pill ${st.adherence >= 80 ? "ok" : st.adherence >= 50 ? "plain" : "warn"}">${st.adherence}%</span>`}</td>
       <td>${spark(pains)}</td>
       <td class="num">${k ? `${k.value}${k.prev != null ? ` <span class="small ${k.value >= k.prev ? "up" : "down"}">${k.value >= k.prev ? "▲" : "▼"}${Math.abs(k.value - k.prev)}</span>` : ""}<div class="small muted">${h(k.tool)}</div>` : `<span class="muted">–</span>`}</td>
@@ -145,8 +146,15 @@ function patientDetailHtml(p) {
   const tabs = [["overview", "요약·AI 검진"], ["schedule", "일정·컨디션"], ["soap", "SOAP 작성"], ["history", "기록 이력"], ["home", "가정 프로그램"], ["msg", `메시지${un ? ` (${un})` : ""}`]];
   const member = cache.names[p.userId];
   return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}</h1>
-      <div class="meta">${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
+      <div class="meta">${p.birthDate ? `<span>생년월일 ${fmtBirth(p.birthDate)}</span>` : `<span class="pill warn">생년월일 미입력</span>`}${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
         ${p.userId ? `<span class="pill ok">앱 가입${member && member !== p.name ? ` · ${h(member)}` : ""}</span>` : `<span>초대 코드 <b class="mono">${h(p.invite ?? "")}</b> <button class="btn sm" data-act="copy-invite">복사</button> <button class="btn sm ghost" data-act="reissue">새 코드</button></span>`}</div></div></div>
+    <details class="pinfo" ${p.birthDate ? "" : "open"}><summary class="small">기본 정보 수정</summary>
+      <form id="f-pinfo" class="formgrid" style="margin-top:.5rem">
+        <div class="field"><label class="label" for="pi-name">이름</label><input type="text" id="pi-name" required value="${h(p.name)}"></div>
+        <div class="field"><label class="label" for="pi-birth">생년월일</label><input type="date" id="pi-birth" required min="1900-01-01" max="${localDate()}" value="${p.birthDate ?? ""}"></div>
+        <div class="field"><label class="label" for="pi-visit">첫 내원일</label><input type="date" id="pi-visit" value="${p.firstVisit ?? ""}"></div>
+        <div class="wide"><button class="btn primary sm" type="submit">저장</button></div>
+      </form></details>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-act="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`).join("")}</div>
     ${{ overview: tOverview, schedule: tSchedule, soap: tSoap, history: tHistory, home: tHome, msg: tMsg }[state.tab](p)}`;
 }
@@ -154,9 +162,10 @@ function patientDetailHtml(p) {
 function newPatientHtml() {
   return `<section class="panel" style="max-width:34rem">
     <h2>환자 등록</h2>
-    <p class="small muted">이름과 첫 내원일만 입력해 환자를 추가합니다. 진단이나 병력 같은 의료 정보는 여기서 받지 않습니다. 등록하면 초대 코드가 만들어지고, 환자나 보호자에게 알려 주면 앱에 가입할 수 있습니다.</p>
+    <p class="small muted">이름, 생년월일, 첫 내원일만 입력해 환자를 추가합니다. 진단이나 병력 같은 의료 정보는 여기서 받지 않습니다. 등록하면 초대 코드가 만들어지고, 환자나 보호자에게 알려 주면 앱에 가입할 수 있습니다.</p>
     <form id="f-patient" class="formgrid">
       <div class="field"><label class="label" for="np-name">이름</label><input type="text" id="np-name" required autocomplete="off"></div>
+      <div class="field"><label class="label" for="np-birth">생년월일</label><input type="date" id="np-birth" required min="1900-01-01" max="${localDate()}"></div>
       <div class="field"><label class="label" for="np-visit">첫 내원일</label><input type="date" id="np-visit" value="${localDate()}" required></div>
       <div class="toolbar wide"><button class="btn primary" type="submit">등록</button>${cache.patients.length ? `<button class="btn ghost" type="button" data-act="t-dashboard">취소</button>` : ""}</div>
     </form></section>`;

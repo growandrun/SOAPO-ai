@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(41);
+select plan(44);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -15,6 +15,7 @@ set local role authenticated;
 set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}';
 select lives_ok($$ select register_therapist('김하늘', '12345') $$, '치료사 가입');
 select lives_ok($$ insert into patients (therapist_id, name, diagnosis) values (auth.uid(), '테스트환자', '뇌졸중') $$, '치료사가 환자 등록');
+select lives_ok($$ update patients set birth_date = '1958-03-12', first_visit_on = current_date where name = '테스트환자' $$, '치료사가 생년월일·첫 내원일 수정');
 select lives_ok($$ insert into goals (patient_id, type, text) select id, 'STG', '식사 Mod I' from patients $$, '목표 추가');
 select lives_ok($$ insert into assessments (patient_id, tool, value, max_value) select id, 'K-MBI', 52, 100 from patients $$, '점수 추가');
 select lives_ok($$ insert into home_programs (patient_id, title, instructions) select id, '어깨 운동', '천천히' from patients $$, '가정 프로그램 처방');
@@ -42,6 +43,7 @@ select is((select count(*) from soap_notes), 0::bigint, '다른 치료사의 SOA
 select throws_ok($$ insert into goals (patient_id, type, text) values (current_setting('test.pid')::uuid, 'STG', 'x') $$, '42501', null, '남의 환자 id를 알아도 목표 추가 불가');
 select throws_ok($$ insert into appointments (patient_id, starts_at) values (current_setting('test.pid')::uuid, now()) $$, '42501', null, '남의 환자에 일정 추가 불가');
 select is((select count(*) from appointments), 0::bigint, '다른 치료사의 일정은 안 보임');
+select lives_ok($$ update patients set birth_date = '2000-01-01' where id = current_setting('test.pid')::uuid $$, '다른 치료사의 수정 시도 (적용되는 행 없음)');
 
 -- ── 환자 p1: 초대 코드로 가입 ────────────────────────────────
 set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000b1","role":"authenticated"}';
@@ -64,6 +66,7 @@ select is((select relation from profiles where id = auth.uid()), 'self', '기본
 
 set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}';
 select is((select count(*) from symptom_logs), 1::bigint, '담당 치료사는 환자 컨디션 기록을 봄');
+select is((select birth_date from patients where name = '테스트환자'), '1958-03-12'::date, '다른 치료사가 바꾸려 해도 생년월일 그대로');
 select is((select count(*) from thread_reads), 0::bigint, '다른 사람의 읽음 표시는 안 보임');
 set local request.jwt.claims to '{"sub":"00000000-0000-0000-0000-0000000000a2","role":"authenticated"}';
 select is((select count(*) from symptom_logs), 0::bigint, '다른 치료사는 컨디션 기록을 못 봄');
