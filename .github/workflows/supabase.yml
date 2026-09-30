@@ -5,7 +5,7 @@ name: Supabase 설정
 #
 # 저장소 Settings → Secrets and variables → Actions
 #   Secret   SUPABASE_ACCESS_TOKEN  (필수)
-#   Variable SITE_URL  Vercel 주소, 예: https://soapo-ai.vercel.app  (로그인 메일 링크가 돌아올 곳)
+#   Variable SITE_URL  Vercel 주소, 예: https://soapoai.vercel.app  (로그인 메일 링크가 돌아올 곳)
 #   Secret   SUPABASE_DB_PASSWORD  새 migration을 자동 적용하려면 필요
 #   프로젝트 ref는 supabase/production.json 에서 읽는다 (SUPABASE_PROJECT_REF secret이 있으면 그것을 우선)
 #   선택: Secret RESEND_API_KEY + Variable MAIL_FROM  (환자에게 메일 보내기)

@@ -50,24 +50,24 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
 | Supabase 프로젝트 `soapo supabase` (서울) | ✅ 만들어짐 |
 | DB 테이블·권한·실시간 메시지 (`supabase/migrations/`) | ✅ 적용됨, Supabase 보안 점검 반영 |
 | 앱이 쓸 연결값 (`supabase/production.json`) | ✅ 저장소에 들어 있음 (공개 키라 괜찮음) |
-| ① Vercel에 저장소 연결 | 할 일 |
+| ① Vercel에 저장소 연결 | ✅ https://soapoai.vercel.app (push하면 자동 배포) |
 | ② 로그인 설정 (사이트 주소, 한국어 메일) | 할 일 |
 | ③ 환자에게 메일 보내기 (Resend) | 할 일 |
 
-### ① Vercel에 저장소 연결 (3분)
+### ① Vercel에 저장소 연결 (완료)
 1. [vercel.com](https://vercel.com)에 GitHub 계정으로 로그인합니다.
 2. **Add New → Project → `growandrun/SOAPO-ai` Import**를 누릅니다.
 3. 설정은 건드리지 말고 **Deploy**를 누릅니다.
 
 빌드가 `supabase/production.json`을 읽어 Supabase에 자동으로 연결하므로 환경 변수를 넣지 않아도 됩니다. (Vercel 환경 변수 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`가 있으면 그 값이 우선합니다.)
-배포가 끝나면 나오는 주소(예: `https://soapo-ai.vercel.app`)를 ②에서 씁니다.
+배포가 끝나면 나오는 주소(예: `https://soapoai.vercel.app`)를 ②에서 씁니다.
 
 ### ② 로그인 설정 (3분) — 둘 중 하나
 
 **방법 A: Supabase 대시보드에서 직접**
 1. [Authentication → URL Configuration](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/url-configuration)
-   - **Site URL**: Vercel 주소 (예: `https://soapo-ai.vercel.app`)
-   - **Redirect URLs**: `https://soapo-ai.vercel.app/**` 추가
+   - **Site URL**: Vercel 주소 (예: `https://soapoai.vercel.app`)
+   - **Redirect URLs**: `https://soapoai.vercel.app/**` 추가
 2. [Authentication → Emails](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/templates)
    - **Magic link**와 **Confirm signup** 두 곳 모두 제목을 `SOAPO 재활노트 로그인`으로 바꿉니다.
    - 본문에는 `supabase/templates/magic_link.html` 내용을 붙여 넣습니다.

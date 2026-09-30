@@ -7,7 +7,7 @@
    필요한 환경 변수
      SUPABASE_ACCESS_TOKEN  supabase.com/dashboard/account/tokens 에서 만든 토큰
      SUPABASE_PROJECT_REF   프로젝트 ref (대시보드 주소의 20자리 영문)
-     SITE_URL               배포 주소, 예: https://soapo-ai.vercel.app
+     SITE_URL               배포 주소, 예: https://soapoai.vercel.app
    선택
      SUPABASE_PUBLISHABLE_KEY  비우면 API에서 자동으로 가져옴
      RESEND_API_KEY + MAIL_FROM     Resend로 메일 발송 (MAIL_FROM 예: login@내도메인.kr)
