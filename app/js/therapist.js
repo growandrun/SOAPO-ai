@@ -7,6 +7,8 @@ import { lineChart, spark } from "./charts.js";
 import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday, fmtBirth } from "./layout.js";
 import { FIELDS, GROUPS, TREATMENTS, OBSERVATIONS, treatment, levelsOf, levelLabelOf, itemSummary, observation, assistOptions,
   PACKS, DEFAULT_PACKS, ASSIST_SCALES, PRECAUTIONS, WEIGHT_BEARING, DIET_FOOD, DIET_DRINK, SIDES, DISCHARGE_REASONS, labelOf, safetyTags } from "./catalog.js";
+import { officeOf, pushCardHtml } from "./reach.js";
+import { METRICS } from "./camera.js";
 import { KMBI, KMBI_LEVELS, kmbiSteps, MMSE, MMT_MUSCLES, MMT_GRADES, ROM_MOTIONS, ASSESS_KINDS, isRegional, fmtScore } from "./assessments.js";
 
 const LEVEL_ORDER = { danger: 0, warn: 1, info: 2 };
@@ -49,7 +51,7 @@ export function railHtml() {
 /** 치료사 설정: 도움 수준 표기, 체크리스트에 보일 치료 분야 */
 function settingsHtml() {
   const prefs = cache.profile.prefs ?? {};
-  const packs = prefs.packs ?? DEFAULT_PACKS, sc = prefs.assistScale ?? "ot";
+  const packs = prefs.packs ?? DEFAULT_PACKS, sc = prefs.assistScale ?? "ot", office = officeOf(prefs);
   return `<section class="panel" style="max-width:46rem"><h2>설정</h2>
     <form id="f-settings" class="visitform">
       <fieldset class="vgroup"><legend>도움 수준 표기</legend>
@@ -60,8 +62,19 @@ function settingsHtml() {
         <p class="small muted">고른 분야의 치료만 체크리스트에 나옵니다. 여러 개를 골라도 됩니다.</p>
         ${PACKS.map(([k, l, d]) => `<label class="chk"><input type="checkbox" name="pack" value="${k}" ${packs.includes(k) ? "checked" : ""}><span><b>${l}</b> <span class="small muted">${d}</span></span></label>`).join("")}
       </fieldset>
+      <fieldset class="vgroup"><legend>메시지 응답 시간</legend>
+        <p class="small muted">켜 두면 환자·보호자 대화 화면에 응답 시간이 보이고, 시간 밖에 온 메시지에는 자동 안내가 한 번 나갑니다 (3시간에 한 번).</p>
+        <label class="chk"><input type="checkbox" id="of-on" ${office.on ? "checked" : ""}><span>응답 시간 사용</span></label>
+        <div class="toolbar">${["일", "월", "화", "수", "목", "금", "토"].map((d, i) => `<label class="chk day"><input type="checkbox" name="of-day" value="${i}" ${office.days.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
+        <div class="formgrid"><div class="field"><label class="label" for="of-start">시작</label><input type="time" id="of-start" value="${office.start}"></div>
+          <div class="field"><label class="label" for="of-end">끝</label><input type="time" id="of-end" value="${office.end}"></div>
+          <div class="field wide"><label class="label" for="of-msg">자동 안내 문구 (비우면 기본 문구)</label><input type="text" id="of-msg" maxlength="300" value="${h(office.message)}" placeholder="지금은 치료사 응답 시간이 아니에요. … 응급 상황이면 119에 연락하세요."></div></div>
+      </fieldset>
       <div class="toolbar"><button class="btn primary" type="submit">설정 저장</button></div>
-    </form></section>`;
+    </form>
+    <h2 style="margin-top:1rem">이 기기 알림</h2>
+    ${pushCardHtml()}
+    <p class="small muted">알림 기능은 https 주소(배포된 사이트)에서만 동작합니다.</p></section>`;
 }
 
 /* ================= 대시보드 ================= */
@@ -207,7 +220,7 @@ function patientDetailHtml(p) {
   return `<div class="phead"><div style="display:grid;gap:.25rem;min-width:0"><h1>${h(p.name)}${closed ? ` <span class="pill plain">치료 종결</span>` : ""}</h1>
       <div class="meta">${p.chartNo ? `<span>차트 <b class="mono">${h(p.chartNo)}</b></span>` : ""}${p.birthDate ? `<span>생년월일 ${fmtBirth(p.birthDate)}</span>` : `<span class="pill warn">생년월일 미입력</span>`}${p.firstVisit ? `<span>첫 내원 ${h(p.firstVisit)}</span>` : ""}
         ${closed ? `<span>종결 ${h(p.dischargedOn ?? "")} · ${h(labelOf(DISCHARGE_REASONS, p.dischargeReason) ?? "")}</span>` : ""}
-        ${p.userId ? `<span class="pill ok">앱 가입${member && member !== p.name ? ` · ${h(member)}` : ""}</span>` : `<span>초대 코드 <b class="mono">${h(p.invite ?? "")}</b> <button class="btn sm" data-act="copy-invite">복사</button> <button class="btn sm ghost" data-act="reissue">새 코드</button></span>`}</div></div></div>
+        ${p.userId ? `<span class="pill ok">앱 가입${member && member !== p.name ? ` · ${h(member)}` : ""}</span>` : `<span>초대 코드 <b class="mono">${h(p.invite ?? "")}</b> <button class="btn sm" data-act="share-invite">카카오톡 등으로 보내기</button> <button class="btn sm ghost" data-act="copy-invite">복사</button> <button class="btn sm ghost" data-act="reissue">새 코드</button></span>`}</div></div></div>
     ${tags.length || p.precautionNote ? `<div class="safety-bar"><b>⚠ 안전 주의</b>${tags.map((t) => `<span class="pill safety">${h(t)}</span>`).join("")}${p.precautionNote ? `<span class="small">${h(p.precautionNote)}</span>` : ""}</div>` : ""}
     <div class="pinfo-row">
     <details class="pinfo" ${p.birthDate ? "" : "open"}><summary class="small">기본 정보 수정</summary>
@@ -299,7 +312,7 @@ function tOverview(p) {
     </section>
     <section class="panel"><h2>최근 7일 가정 운동</h2>
       <div class="bigcount"><div><span class="small muted">수행률</span><strong>${st.adherence ?? "–"}${st.adherence != null ? "%" : ""}</strong></div><div><span class="small muted">완료</span><strong>${st.done}/${st.expected}</strong></div><div><span class="small muted">최대 통증</span><strong>${st.maxPain}/10</strong></div></div>
-      ${st.cam.length ? `<p class="small">카메라 측정 어깨 굽힘 최대각: ${st.cam.map((x) => `<span class="mono">${x.maxAngle}°</span>`).join(" → ")}</p>` : `<p class="small muted">카메라 측정 기록 없음</p>`}
+      ${st.cam.length ? `<p class="small">카메라 측정 최대각: ${st.cam.map((x) => `<span class="mono">${x.maxAngle}°</span>`).join(" → ")}</p>` : `<p class="small muted">카메라 측정 기록 없음</p>`}
     </section>
   </div>`;
 }
@@ -472,10 +485,13 @@ function visitForm(p) {
     </fieldset>
     ${goals.length ? `<fieldset class="vgroup"><legend>관련 목표 <span class="small muted">이번 치료가 어느 목표를 위한 것인지</span></legend>
       <div class="goalpick">${goals.map((g) => `<label class="chk"><input type="checkbox" name="goal" value="${g.id}" ${prefill?.goalIds.includes(g.id) ? "checked" : ""}><span><span class="tag">${g.type}</span> ${h(g.text)}</span></label>`).join("")}</div></fieldset>` : ""}
-    <fieldset class="vgroup"><legend>관찰·특이사항</legend>
+    <fieldset class="vgroup"><legend>관찰·특이사항 <span class="small muted">치료사만 봄</span></legend>
       <div class="chkgrid">${OBSERVATIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" name="obs" value="${k}" ${prefill?.observations.includes(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>
     </fieldset>
-    <div class="field"><label class="label" for="vs-note">메모 (선택)</label><textarea id="vs-note" rows="2" maxlength="2000" placeholder="체크리스트에 없는 치료나 특이사항. 환자·보호자 앱에도 보입니다.">${h(prefill?.note ?? "")}</textarea></div>
+    <div class="formgrid">
+      <div class="field"><label class="label" for="vs-staff">치료사 전용 메모 <span class="small muted">환자에게 안 보임</span></label><textarea id="vs-staff" rows="2" maxlength="2000" placeholder="임상 판단, 다음 회기 계획 등">${h(editing?.staffNote ?? "")}</textarea></div>
+      <div class="field"><label class="label" for="vs-note">환자·보호자에게 보일 메모 <span class="small muted">앱에 표시</span></label><textarea id="vs-note" rows="2" maxlength="2000" placeholder="예: 집에서도 밴드 운동 10회씩 해 주세요">${h(prefill?.note ?? "")}</textarea></div>
+    </div>
     ${mates.length ? `<details class="vgroup mates"><summary><b>그룹 치료</b> <span class="small muted">같은 내용을 다른 환자에게도 함께 저장</span></summary>
       <div class="chkgrid">${mates.map((x) => `<label class="chk"><input type="checkbox" name="mate" value="${x.id}"><span>${h(x.name)}${x.today ? ` <span class="pill plain">${fmtDate(date)} 일정</span>` : ""}</span></label>`).join("")}</div>
       <p class="small muted">함께 고른 환자에게도 같은 치료·관찰·메모가 저장되고, 그 날 일정이 있으면 연결되어 완료 처리됩니다.</p></details>` : ""}
@@ -513,7 +529,8 @@ function tVisits(p) {
         <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it))}</li>`).join("")}</ul>
         ${v.goalIds.length ? `<div class="small muted">목표: ${v.goalIds.map((id) => p.goals.find((g) => g.id === id)).filter(Boolean).map((g) => `<span class="tag">${g.type}</span> ${h(g.text.slice(0, 30))}${g.text.length > 30 ? "…" : ""}`).join(" · ")}</div>` : ""}
         ${v.observations.length ? `<div class="flags">${v.observations.map((k) => `<span class="pill ${["fall_risk", "dizzy", "skin", "pain", "early_stop"].includes(k) ? "warn" : "plain"}">${h(observation(k))}</span>`).join("")}</div>` : ""}
-        ${v.note ? `<p class="small">${h(v.note)}</p>` : ""}
+        ${v.staffNote ? `<p class="small"><span class="pill plain">치료사 메모</span> ${h(v.staffNote)}</p>` : ""}
+        ${v.note ? `<p class="small"><span class="pill info">환자에게 보임</span> ${h(v.note)}</p>` : ""}
       </article>`).join("") : `<p class="muted small">아직 내원기록이 없습니다. 위에서 오늘 한 치료를 체크해 저장하세요.</p>`}
     </section>
     ${progressTable(vs) || `<section class="panel"><h2>치료별 변화</h2><p class="muted small">내원기록이 쌓이면 치료마다 무게·횟수·도움 수준이 어떻게 바뀌었는지 보여 줍니다.</p></section>`}
@@ -604,7 +621,7 @@ function tHome(p) {
       <div class="formgrid">
         <div class="field"><label class="label" for="pg-target">목표 횟수</label><input type="text" id="pg-target" inputmode="numeric" value="10"></div>
         <div class="field"><label class="label" for="pg-perday">하루 횟수</label><input type="text" id="pg-perday" inputmode="numeric" value="1"></div>
-        <div class="field"><label class="label" for="pg-camera">카메라 측정</label><select id="pg-camera"><option value="">사용 안 함</option><option value="shoulder_flexion">어깨 굽힘 각도·횟수</option></select></div>
+        <div class="field"><label class="label" for="pg-camera">카메라 측정</label><select id="pg-camera"><option value="">사용 안 함</option>${Object.entries(METRICS).map(([k, m]) => `<option value="${k}">${m.label} (각도·횟수)</option>`).join("")}</select></div>
         <div class="field"><label class="label" for="pg-angle">목표 각도(°)</label><input type="text" id="pg-angle" inputmode="numeric" value="90"></div>
       </div>
       <button class="btn primary" type="submit">처방 보내기</button>

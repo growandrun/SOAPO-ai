@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(67);
+select plan(74);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -39,11 +39,14 @@ select lives_ok($$ insert into assessments (patient_id, tool, value, max_value, 
 select lives_ok($$ update patients set status = 'discharged', discharged_on = current_date, discharge_reason = 'goal_met' where name = '코드재발급환자' $$, '치료 종결 처리');
 select lives_ok($$ update profiles set prefs = '{"assistScale":"fim"}' where id = auth.uid() $$, '치료사 본인 설정 저장');
 select throws_ok($$ update profiles set verified = true where id = auth.uid() $$, '42501', null, '면허 확인 여부는 스스로 바꿀 수 없음');
-select lives_ok($$ insert into visits (patient_id, appointment_id, visited_on, duration_min, items, observations)
-  select p.id, a.id, current_date, 30, '[{"code":"dumbbell","side":"R","weight":2,"sets":3,"reps":10},{"code":"eating","assist":"MinA","minutes":15}]', '{guardian,pain}'
+select lives_ok($$ insert into visits (patient_id, appointment_id, visited_on, duration_min, items)
+  select p.id, a.id, current_date, 30, '[{"code":"dumbbell","side":"R","weight":2,"sets":3,"reps":10},{"code":"eating","assist":"MinA","minutes":15}]'
   from patients p join appointments a on a.patient_id = p.id where p.name = '테스트환자' $$, '치료사가 내원기록 저장 (치료 항목·체크리스트)');
 select throws_ok($$ insert into visits (patient_id, visited_on, items) select id, current_date, '{"code":"x"}' from patients where name = '테스트환자' $$, '23514', null, '치료 항목은 배열이어야 함');
 select throws_ok($$ insert into visits (patient_id, appointment_id, visited_on) select p.id, a.id, current_date from patients p, appointments a where p.name = '코드재발급환자' $$, '42501', null, '다른 환자의 일정에 내원기록을 연결할 수 없음');
+select lives_ok($$ insert into visit_private (visit_id, patient_id, observations, staff_note) select id, patient_id, '{guardian,pain}', '치료사만 보는 메모' from visits $$, '치료사 전용 관찰·메모 저장');
+select throws_ok($$ insert into visit_private (visit_id, patient_id) select v.id, p.id from visits v, patients p where p.name = '코드재발급환자' $$, '42501', null, '다른 환자의 내원기록에 전용 메모를 붙일 수 없음');
+select lives_ok($$ insert into home_programs (patient_id, title, instructions, camera_metric) select id, '팔꿈치 굽히기', '천천히', 'elbow_flexion' from patients where name = '테스트환자' $$, '카메라 측정: 팔꿈치 굽힘');
 
 -- 이후 테스트에서 쓸 환자 id와 초대 코드 (관리자 권한으로 조회)
 reset role;
@@ -62,6 +65,7 @@ select throws_ok($$ insert into appointments (patient_id, starts_at) values (cur
 select is((select count(*) from appointments), 0::bigint, '다른 치료사의 일정은 안 보임');
 select throws_ok($$ insert into visits (patient_id, visited_on) values (current_setting('test.pid')::uuid, current_date) $$, '42501', null, '남의 환자에 내원기록 추가 불가');
 select is((select count(*) from visits), 0::bigint, '다른 치료사의 내원기록은 안 보임');
+select is((select count(*) from visit_private), 0::bigint, '다른 치료사는 전용 메모를 못 봄');
 select lives_ok($$ update profiles set prefs = '{"x":1}' where id = '00000000-0000-0000-0000-0000000000a1' $$, '다른 사람 설정 수정 시도 (적용되는 행 없음)');
 select throws_ok($$ insert into soap_notes (patient_id, s, status, amends_id, amend_reason) values (current_setting('test.pid')::uuid, 's', 'signed', gen_random_uuid(), '남의 기록') $$, '42501', null, '남의 환자 기록 정정 불가');
 select lives_ok($$ update patients set birth_date = '2000-01-01' where id = current_setting('test.pid')::uuid $$, '다른 치료사의 수정 시도 (적용되는 행 없음)');
@@ -82,6 +86,9 @@ select is((select count(*) from appointments), 1::bigint, '환자는 본인 치�
 select throws_ok($$ insert into appointments (patient_id, starts_at) select id, now() from patients $$, '42501', null, '환자는 일정을 만들 수 없음');
 select is((select jsonb_array_length(items) from visits), 2, '환자는 본인 내원기록(치료 항목)을 봄');
 select throws_ok($$ insert into visits (patient_id, visited_on) select id, current_date from patients $$, '42501', null, '환자는 내원기록을 만들 수 없음');
+select is((select count(*) from visit_private), 0::bigint, '환자는 치료사 전용 관찰·메모를 못 봄');
+select lives_ok($$ select save_push_subscription('https://push.example.com/abc', 'key', 'auth') $$, '환자 기기 알림 구독 저장');
+select throws_ok($$ select * from push_config $$, '42501', null, '알림 발송 비밀 키는 읽을 수 없음');
 select lives_ok($$ insert into symptom_logs (patient_id, logged_on, pain, mood) select id, current_date, 3, 4 from patients $$, '환자가 오늘 컨디션 기록');
 select lives_ok($$ insert into symptom_logs (patient_id, logged_on, pain, mood) select id, current_date, 5, 3 from patients on conflict (patient_id, logged_on) do update set patient_id = excluded.patient_id, logged_on = excluded.logged_on, pain = excluded.pain, mood = excluded.mood $$, '같은 날 컨디션은 덮어쓰기 (API upsert와 같은 형태)');
 select is((select pain from symptom_logs), 5, '덮어쓴 통증 값');

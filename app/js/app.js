@@ -10,6 +10,7 @@ import { state, intent } from "./state.js";
 import { landingHtml, authHtml, onboardHtml, setupHtml, errorHtml, resetHtml } from "./landing.js";
 import { therapistHtml, railHtml, updateChecks, threadHtml, openDraft, compareNote } from "./therapist.js";
 import { patientHtml, MOOD, SLEEP } from "./patient.js";
+import * as R from "./reach.js";
 import { KMBI, MMSE, MMT_MUSCLES, ROM_MOTIONS, SIDE_TAG, gradeToNum } from "./assessments.js";
 
 const { cache, view } = D;
@@ -71,11 +72,14 @@ async function enter() {
   unsubscribe?.();
   unsubscribe = D.subscribeMessages(onNewMessage);
   state.phase = "ready";
+  // 알림을 눌러 들어온 경우 대화 화면으로
+  if (new URLSearchParams(location.search).get("open") === "msg" && cache.profile.role === "patient") state.ptab = "msg";
   if (location.hash.includes("access_token") || location.search) history.replaceState(null, "", location.pathname);
   render();
 }
 
 function onNewMessage(row) {
+  R.tabNotify(cache.profile.role === "therapist" ? "환자·보호자에게서 새 메시지가 왔어요" : "치료사에게서 새 메시지가 왔어요");
   const th = app.querySelector(".thread");
   if (th && th.dataset.pid === row.patient_id) { th.outerHTML = threadHtml(row.patient_id); scrollThread(); D.markRead(row.patient_id).catch(() => {}); return; }
   if (cache.profile.role === "therapist") {
@@ -90,6 +94,7 @@ function render() {
     ready: () => (cache.profile.role === "therapist" ? therapistHtml() : patientHtml()) }[state.phase];
   app.innerHTML = r();
   scrollThread();
+  if (document.getElementById("push-card")) R.fillPushCard();
   if (state.phase === "ready" && cache.profile.role === "therapist" && state.tView === "patient") {
     if (state.tab === "soap") updateChecks();
     if (state.tab === "visits") syncVisitForm();
@@ -308,6 +313,14 @@ document.addEventListener("click", async (e) => {
         await run(b, () => D.setAppointmentStatus(b.dataset.id, b.dataset.status));
         toast({ done: "완료로 표시했습니다", no_show: "결석으로 표시했습니다", cancelled: "취소했습니다" }[b.dataset.status]); return render();
       }
+      case "share-invite":
+        try { const how = await R.shareInvite(p.name, p.invite); if (how === "copied") toast("초대 문구를 복사했습니다. 카카오톡 등에 붙여 넣어 보내세요"); }
+        catch (err) { if (err?.name !== "AbortError") toast(`초대 코드: ${p.invite}`); }
+        return;
+      case "push-on":
+        await run(b, () => R.enablePush()); toast("새 메시지 알림을 켰습니다"); return R.fillPushCard();
+      case "push-off":
+        await run(b, () => R.disablePush()); toast("이 기기 알림을 껐습니다"); return R.fillPushCard();
       case "copy-invite":
         try { await navigator.clipboard.writeText(p.invite); toast("초대 코드를 복사했습니다"); } catch { toast(`초대 코드: ${p.invite}`); }
         return;
@@ -348,7 +361,8 @@ document.addEventListener("click", async (e) => {
         return openCamera(prog, p.affectedSide, async (r) => {
           await run(null, () => D.addSession({ ...r, patientId: p.id }));
           if (r.pain >= 5 || r.comment) {
-            await run(null, () => D.sendMessage(p.id, `자동 알림: ${prog.title} ${r.reps}회, 최대 ${r.maxAngle}°, 통증 ${r.pain}/10${r.comment ? ` · “${r.comment}”` : ""}`, "ai_alert", r.pain >= 5 ? "warn" : null));
+            const m = await run(null, () => D.sendMessage(p.id, `자동 알림: ${prog.title} ${r.reps}회, 최대 ${r.maxAngle}°, 통증 ${r.pain}/10${r.comment ? ` · “${r.comment}”` : ""}`, "ai_alert", r.pain >= 5 ? "warn" : null));
+            if (r.pain >= 5) D.notifyMessage(m.id);
           }
           toast("운동 기록을 저장했습니다"); render();
         });
@@ -384,6 +398,14 @@ document.addEventListener("change", (e) => {
 document.addEventListener("keydown", (e) => { if (e.key === "Enter" && ["vi-search", "rail-search"].includes(e.target.id)) e.preventDefault(); });
 // 탭을 닫거나 새로고침하기 전에 SOAP 초안 저장 시도
 window.addEventListener("pagehide", () => { saveDraftNow(state.draft, { quiet: true }).catch(() => {}); });
+
+// 서비스 워커: 알림을 눌렀을 때 열려 있던 앱을 대화 화면으로
+navigator.serviceWorker?.addEventListener("message", (e) => {
+  if (e.data?.type !== "open-messages" || state.phase !== "ready") return;
+  if (cache.profile.role === "patient") { state.ptab = "msg"; D.markRead(cache.patients[0]?.id).catch(() => {}); }
+  else Object.assign(state, { tView: "dashboard", selected: null });
+  render();
+});
 
 /* ================= 폼 제출 ================= */
 document.addEventListener("submit", async (e) => {
@@ -467,7 +489,9 @@ document.addEventListener("submit", async (e) => {
         const packs = [...f.querySelectorAll("input[name=pack]:checked")].map((c) => c.value);
         if (!packs.length) return toast("치료 분야를 하나 이상 골라 주세요", "error");
         const assistScale = f.querySelector("input[name=scale]:checked")?.value ?? "ot";
-        await run(btn, () => D.savePrefs({ ...(cache.profile.prefs ?? {}), assistScale, packs }));
+        const office = { on: f.querySelector("#of-on").checked, days: [...f.querySelectorAll("input[name=of-day]:checked")].map((c) => +c.value), start: v("of-start") || "09:00", end: v("of-end") || "18:00", message: v("of-msg") };
+        if (office.on && (!office.days.length || office.start >= office.end)) return toast("응답 요일을 고르고, 끝 시간이 시작보다 늦게 해 주세요", "error");
+        await run(btn, () => D.savePrefs({ ...(cache.profile.prefs ?? {}), assistScale, packs, office }));
         toast("설정을 저장했습니다"); return render();
       }
       case "f-assess": {
@@ -504,10 +528,10 @@ document.addEventListener("submit", async (e) => {
           return JSON.parse(JSON.stringify({ code, side: str(`${code}.side`), level: str(`${code}.level`), weight: num(`${code}.weight`), sets: num(`${code}.sets`), reps: num(`${code}.reps`), minutes: num(`${code}.minutes`), assist: str(`${code}.assist`), response: str(`${code}.response`), how: str(`${code}.how`) })); // undefined 칸은 빼고 저장
         });
         const observations = [...f.querySelectorAll("input[name=obs]:checked")].map((c) => c.value);
-        const note = v("vs-note");
-        if (!items.length && !note) return toast("한 치료를 하나 이상 체크하거나 메모를 적어 주세요", "error");
+        const note = v("vs-note"), staffNote = v("vs-staff");
+        if (!items.length && !note && !staffNote) return toast("한 치료를 하나 이상 체크하거나 메모를 적어 주세요", "error");
         const date = v("vs-date") || localDate();
-        const base = { date, duration: num("vs-dur") || null, items, observations, note };
+        const base = { date, duration: num("vs-dur") || null, items, observations, note, staffNote };
         if (state.visitEdit) {
           await run(btn, () => D.updateVisit(state.visitEdit, { ...base, goalIds: [...f.querySelectorAll("input[name=goal]:checked")].map((c) => c.value), appointmentId: v("vs-appt") }));
           state.visitEdit = null; window.scrollTo({ top: 0 });
@@ -541,15 +565,22 @@ document.addEventListener("submit", async (e) => {
       case "f-symptom": {
         const s = { patientId: p.id, date: localDate(), pain: +v("sy-pain"), fatigue: +v("sy-fatigue"), mood: +v("sy-mood"), sleep: +v("sy-sleep"), note: v("sy-note") };
         await run(btn, () => D.saveSymptom(s));
-        if (s.pain >= 6) await run(null, () => D.sendMessage(p.id, `자동 알림: 오늘 컨디션 통증 ${s.pain}/10, 기분 ${MOOD[s.mood]}, 수면 ${SLEEP[s.sleep]}${s.note ? ` · “${s.note}”` : ""}`, "ai_alert", "warn")).catch(() => {});
+        if (s.pain >= 6) await run(null, () => D.sendMessage(p.id, `자동 알림: 오늘 컨디션 통증 ${s.pain}/10, 기분 ${MOOD[s.mood]}, 수면 ${SLEEP[s.sleep]}${s.note ? ` · “${s.note}”` : ""}`, "ai_alert", "warn")).then((m) => D.notifyMessage(m.id)).catch(() => {});
         state.editSymptom = false;
         toast(s.pain >= 6 ? "저장했습니다. 통증이 높아 치료사에게 알렸어요" : "오늘 컨디션을 저장했습니다"); return render();
       }
       case "f-msg": {
         const text = v("msg-text"); if (!text) return;
         const t = cache.profile.role === "patient" ? AI.triage(text) : null;
-        await run(btn, () => D.sendMessage(p.id, text, "text", t?.level ?? null));
+        const sent = await run(btn, () => D.sendMessage(p.id, text, "text", t?.level ?? null));
+        D.notifyMessage(sent.id);
         if (t) await run(null, () => D.sendMessage(p.id, t.text, "ai_alert"));
+        // 치료사 응답 시간 밖이면 자동 안내 (3시간에 한 번)
+        if (cache.profile.role === "patient") {
+          const o = R.officeOf(cache.prefsById[p.therapistId]);
+          const recent = view.messages(p.id).some((m) => m.from === "ai" && m.text.startsWith("자동 안내:") && Date.now() - new Date(m.at) < 3 * 3600e3);
+          if (!R.isOpen(o) && !recent) await run(null, () => D.sendMessage(p.id, R.autoReplyText(o), "ai_alert")).catch(() => {});
+        }
         D.markRead(p.id).catch(() => {});
         const th = app.querySelector(".thread"); if (th) th.outerHTML = threadHtml(p.id);
         f.reset(); scrollThread(); return;

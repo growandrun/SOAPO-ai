@@ -64,7 +64,9 @@ await T.click('[data-tab=assess]'); await T.selectOption('#as-kind', 'simple'); 
 for (const [v, d] of [['48', '2026-09-16'], ['55', '2026-09-23']]) { await T.fill('#sc-tool', 'K-MBI'); await T.fill('#sc-value', v); await T.fill('#sc-max', '100'); await T.fill('#as-date', d); await T.click('#f-assess button[type=submit]'); await T.waitForTimeout(400); }
 await T.click('[data-tab=home]'); await T.fill('#pg-title', '어깨 앞으로 들어올리기'); await T.fill('#pg-detail', '천천히 들어 올렸다 내립니다'); await T.fill('#pg-target', '5'); await T.selectOption('#pg-camera', 'shoulder_flexion'); await T.click('#f-prog button[type=submit]');
 await T.waitForTimeout(400); await T.fill('#pg-title', '콩 옮기기'); await T.fill('#pg-detail', '콩 20개를 옮깁니다'); await T.selectOption('#pg-camera', ''); await T.click('#f-prog button[type=submit]');
-await T.waitForFunction(() => document.querySelectorAll('.task').length === 2); step('목표·점수·가정 운동 입력');
+await T.waitForFunction(() => document.querySelectorAll('.task').length === 2);
+if ((await T.locator('#pg-camera option').count()) !== 4) throw new Error('카메라 측정 동작이 3가지가 아님');
+step('목표·점수·가정 운동 입력');
 // 세부 평가: K-MBI 항목별(모두 4단계 → 80점), ROM, MMT
 await T.click('[data-tab=assess]'); await T.selectOption('#as-kind', 'kmbi'); await T.waitForSelector('select[name="kmbi.feeding"]');
 for (const sel of await T.locator('#f-assess select[name^="kmbi."]').all()) await sel.selectOption({ index: 4 });
@@ -115,6 +117,7 @@ await P.fill('#sy-note', '어깨가 아침에 뻣뻣해요'); await P.click('#f-
 await P.waitForSelector('.symptoms'); await shot(P, '3-patient-home'); step('오늘 컨디션 저장 (통증 7 → 치료사에게 자동 알림)');
 await P.click('[data-tab=exercise]'); await P.click('[data-act=manual]'); await P.waitForSelector('.done');
 await P.click('[data-act=cam]'); await P.click('[data-side=left]'); if ((await P.getAttribute('[data-side=left]', 'aria-pressed')) !== 'true') throw new Error('왼팔 선택 안 됨');
+if (!(await P.isVisible('#cam-guide'))) throw new Error('카메라 준비 안내가 없음');
 await P.waitForSelector('#sim-btn:not([hidden])', { timeout: 15000 }); await P.click('#sim-btn');
 await P.waitForFunction(() => +document.getElementById('c-reps').textContent >= 2, null, { timeout: 20000 });
 await P.click('[data-cam=save]'); await P.waitForFunction(() => !document.getElementById('cam-modal')); step('운동 기록 (직접 + 카메라 시뮬레이션)');
@@ -143,6 +146,7 @@ await T.check('input[name=goal]');
 await T.check('input[name=t][value=dumbbell]'); await T.selectOption('select[name="dumbbell.side"]', 'R'); await T.fill('input[name="dumbbell.weight"]', '2'); await T.fill('input[name="dumbbell.sets"]', '3'); await T.fill('input[name="dumbbell.reps"]', '10'); await T.fill('input[name="dumbbell.how"]', '팔꿈치 90도 유지');
 await T.check('input[name=t][value=eating]'); await T.selectOption('select[name="eating.assist"]', 'MinA'); await T.fill('input[name="eating.minutes"]', '15');
 await T.check('input[name=obs][value=guardian]'); await T.check('input[name=obs][value=fall_risk]');
+await T.fill('#vs-staff', '치료사만 볼 판단 메모'); await T.fill('#vs-note', '집에서도 밴드 운동 10회씩 해 주세요');
 await shot(T, '7-therapist-visit-form');
 await T.click('#f-visit [data-next=stay]'); await T.waitForSelector('.visit');
 const vt = await text(T, '.main');
@@ -188,16 +192,37 @@ await T.click('.rail [data-act=pick]'); await T.click('[data-tab=visits]');
 if (!(await text(T, '#f-visit')).includes('소아 발달')) throw new Error('설정한 치료 분야(소아)가 안 보임');
 if (!(await T.locator('select[name="eating.assist"] option', { hasText: 'FIM 4' }).count())) throw new Error('FIM 표기가 적용되지 않음');
 step('설정: 도움 수준 FIM 표기 · 치료 분야 추가(소아)');
+// 응답 시간: 오늘이 아닌 요일만 켜 두면 지금은 '응답 시간 아님'
+await T.click('[data-act=t-settings]'); await T.check('#of-on');
+for (const box of await T.locator('input[name=of-day]').all()) await box.uncheck();
+await T.check(`input[name=of-day][value="${(today.getDay() + 2) % 7}"]`); await T.click('#f-settings button[type=submit]');
+await T.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('설정을 저장')));
+// 알림 카드: 운영처럼 공개 키가 있으면 '알림 켜기'가 보인다
+await T.route('**/config.js', async (r) => { const res = await r.fetch(); await r.fulfill({ response: res, body: (await res.text()) + '\nwindow.SOAPO_CONFIG.vapidPublicKey = "BFftU4mEb5dCa6OSc4sDex37HW8Wq5l4dwWz_O3VbJS4jRHv4pvcrZ7CjkoJ699UlkvrnXtsRx4yFGu-D0NIp98";' }); });
+await T.reload({ waitUntil: 'domcontentloaded' }); await T.waitForSelector('.tiles'); await T.click('[data-act=t-settings]');
+// 헤드리스 브라우저는 알림 권한이 항상 '차단'이라 켜기 대신 안내가 나온다. 카드가 그려지는지만 확인
+await T.waitForFunction(() => /알림( 켜기| 받기|이 꺼져)/.test(document.querySelector('#push-card:not([hidden])')?.textContent ?? ''), null, { timeout: 10000 });
+await T.unroute('**/config.js');
+step('설정: 메시지 응답 시간 · 이 기기 알림 카드');
 await T.click('.rail [data-act=pick] >> nth=1'); await T.click('details:has(#f-discharge) summary'); await T.selectOption('#dc-reason', 'goal_met'); await T.click('#f-discharge button[type=submit]');
 await T.waitForSelector('[data-act=reactivate]');
 if ((await text(T, '.plist')).includes('김그룹')) throw new Error('종결 환자가 목록에 남아 있음');
 await T.click('[data-act=toggle-discharged]'); await T.waitForFunction(() => document.querySelector('.plist').textContent.includes('김그룹'));
 step('치료 종결 → 목록에서 빠짐 · 종결 환자 보기');
 
-await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.papp'); await P.click('[data-tab=records]'); await P.waitForSelector('.plain-summary');
+await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.papp'); await P.click('[data-tab=msg]'); await P.waitForSelector('.office.closed');
+await P.fill('#msg-text', '밤에 팔이 저려요'); await P.click('#f-msg button');
+await P.waitForFunction(() => [...document.querySelectorAll('.msg.ai')].some((m) => m.textContent.includes('자동 안내')));
+await P.fill('#msg-text', '한 번 더 보내요'); await P.click('#f-msg button'); await P.waitForTimeout(800);
+if ((await P.locator('.msg.ai', { hasText: '자동 안내' }).count()) !== 1) throw new Error('자동 안내가 반복해서 나감');
+step('응답 시간 밖 메시지 → 자동 안내 (한 번만)');
+await P.click('[data-tab=records]'); await P.waitForSelector('.plain-summary');
 if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환자 기록에 치료사 평가 없음');
 if (!(await text(P, '.papp')).includes('정정 확인')) throw new Error('환자에게 정정된 평가가 보이지 않음');
 if (!(await text(P, '.papp')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2.5kg × 3세트 × 10회')) throw new Error('환자 기록에 치료실에서 한 운동 없음');
+{ const pr = await text(P, '.papp');
+  if (!pr.includes('집에서도 밴드 운동')) throw new Error('환자에게 보일 메모가 안 보임');
+  if (pr.includes('치료사만 볼 판단') || pr.includes('낙상 위험 관찰')) throw new Error('치료사 전용 메모·관찰이 환자에게 보임'); }
 step('환자 내 기록: 점수·통증 그래프·치료사 평가·치료실에서 한 운동');
 await P.click('[data-act=logout]'); await P.waitForSelector('.hero'); step('로그아웃 → 홈페이지');
 

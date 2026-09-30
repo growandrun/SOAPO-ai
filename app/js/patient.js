@@ -7,6 +7,7 @@ import { lineChart, ring } from "./charts.js";
 import { topbar, KIND, STATUS, STATUS_PILL, fmtTime, fmtDay, dday } from "./layout.js";
 import { threadHtml, composer } from "./therapist.js";
 import { itemSummary } from "./catalog.js";
+import { officeOf, officeText, isOpen, pushCardHtml } from "./reach.js";
 
 export const MOOD = ["", "매우 나쁨", "나쁨", "보통", "좋음", "매우 좋음"];
 export const SLEEP = ["", "거의 못 잠", "자주 깸", "보통", "잘 잠", "푹 잠"];
@@ -66,6 +67,7 @@ function homeHtml(p) {
       </section>
     </div>
 
+    ${pushCardHtml()}
     <section class="panel">
       <div class="toolbar" style="justify-content:space-between"><h2>오늘 컨디션</h2>${todayLog && !state.editSymptom ? `<button class="btn sm" data-act="edit-symptom">수정</button>` : ""}</div>
       ${todayLog && !state.editSymptom ? `<div class="symptoms">
@@ -104,7 +106,7 @@ function exerciseHtml(p) {
   const streak = days.map((d) => { const n = ctx.sessions.filter((x) => x.date === d).length; return { d, n, cls: need && n >= need ? "full" : n ? "part" : "" }; });
   return `<section class="panel"><div class="toolbar" style="justify-content:space-between"><h2>오늘의 재활 운동</h2><span class="muted small">${today.length}/${need} 완료</span></div>
       ${ctx.programs.map((x) => { const done = today.filter((s) => s.programId === x.id).length >= x.perDay;
-        return `<div class="task"><div style="min-width:0"><strong>${h(x.title)}</strong> <span class="mono small muted">${x.target}${h(x.unit)}${x.perDay > 1 ? ` · 하루 ${x.perDay}번` : ""}</span><p class="small muted">${h(x.detail)}</p></div>
+        return `<div class="task"><div style="min-width:0"><strong>${h(x.title)}</strong> <span class="mono small muted">${x.target}${h(x.unit)}${x.perDay > 1 ? ` · 하루 ${x.perDay}번` : ""}</span><p class="small muted">${h(x.detail)}</p>${x.camera ? `<span class="small muted">카메라가 횟수를 세고 소리로 알려 드려요</span>` : ""}</div>
         ${done ? `<span class="done">완료</span>` : x.camera ? `<button class="btn primary" data-act="cam" data-id="${x.id}">카메라로 시작</button>` : `<button class="btn" data-act="manual" data-id="${x.id}">했어요</button>`}</div>`; }).join("") || `<p class="muted small">치료사가 운동을 처방하면 여기에 나타나요.</p>`}
       <p class="small muted">운동 중 통증이 5 이상이면 멈추고 치료사에게 알려 주세요. 카메라 영상은 이 기기 밖으로 나가지 않습니다.</p>
     </section>
@@ -126,12 +128,15 @@ function recordsHtml(p) {
     ${ctx.visits.length ? `<section class="panel"><h2>치료실에서 한 운동과 훈련</h2>${ctx.visits.slice(0, 6).map((v) => `<article class="visit">
         <strong class="mono">${fmtDate(v.date)}${v.duration ? ` <span class="small muted">· ${v.duration}분</span>` : ""}</strong>
         <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it, "plain"))}</li>`).join("")}</ul>
-        ${v.note ? `<p class="small muted">${h(v.note)}</p>` : ""}</article>`).join("")}
+        ${v.note ? `<p class="small muted">치료사 메모: ${h(v.note)}</p>` : ""}</article>`).join("")}
       <p class="small muted">집에서도 같은 운동을 할 때는 치료사가 처방한 무게와 횟수를 넘기지 마세요.</p></section>` : ""}
     ${past.length ? `<section class="panel"><h2>지난 치료</h2><ul class="appts">${past.map((a) => `<li class="appt"><span class="mono appt-time">${fmtDay(a.startsAt)}</span><span class="appt-who">${KIND[a.kind]}</span><span class="appt-act"><span class="pill ${STATUS_PILL[a.status]}">${STATUS[a.status]}</span></span></li>`).join("")}</ul></section>` : ""}`;
 }
 
 function msgHtml(p) {
-  return `<section class="panel"><h2>${h(cache.names[p.therapistId] ?? "")} 치료사</h2>${threadHtml(p.id)}${composer()}
+  const o = officeOf(cache.prefsById[p.therapistId]);
+  return `<section class="panel"><h2>${h(cache.names[p.therapistId] ?? "")} 치료사</h2>
+    ${o.on ? `<p class="office ${isOpen(o) ? "open" : "closed"}"><b>${isOpen(o) ? "지금은 응답 시간이에요" : "지금은 응답 시간이 아니에요"}</b><span class="small">치료사 응답 시간: ${officeText(o)}${isOpen(o) ? "" : " · 남긴 메시지는 응답 시간에 확인해요"}</span></p>` : ""}
+    ${threadHtml(p.id)}${composer()}
     <p class="small muted">통증, 붓기, 저림 같은 증상을 쓰면 치료사에게 먼저 알려요. 응급 상황은 119에 연락하세요.</p></section>`;
 }

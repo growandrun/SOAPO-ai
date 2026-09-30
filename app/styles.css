@@ -384,3 +384,13 @@ details.mates[open] > summary { margin-bottom: .4rem; }
 table.inputs td, table.inputs th { padding: .25rem .35rem; }
 table.inputs input, table.inputs select { width: 100%; min-width: 4rem; }
 #rail-search { width: 100%; }
+
+/* ===== 환자·보호자 연락 ===== */
+.push-card { display: grid; gap: .35rem; justify-items: start; padding: .8rem 1rem; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--r); }
+.push-card b { color: var(--accent); }
+.office { display: grid; gap: .15rem; margin: 0 0 .6rem; padding: .6rem .8rem; border-radius: 8px; }
+.office.open { background: var(--accent-soft); color: var(--accent); }
+.office.closed { background: var(--warn-soft); color: var(--warn); }
+.office .small { color: var(--ink); }
+.cam-guide { margin: 0; padding-left: 1.3rem; display: grid; gap: .35rem; font-size: 1.05rem; line-height: 1.5; }
+#cam-modal .center { font-size: 1.05rem; }

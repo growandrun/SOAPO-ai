@@ -36,7 +36,9 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 await cp(new URL("app/", root), out, { recursive: true });
 
-const config = url && key ? { supabaseUrl: url, supabaseKey: key } : { supabaseUrl: "", supabaseKey: "" };
+// 웹 푸시 공개 키: 운영 프로젝트에 연결할 때만 production.json 값을 쓴다
+const vapid = pick("SOAPO_VAPID_PUBLIC_KEY") || (url && url === (prod.supabaseUrl ?? "").replace(/\/+$/, "") ? prod.vapidPublicKey ?? "" : "");
+const config = url && key ? { supabaseUrl: url, supabaseKey: key, vapidPublicKey: vapid } : { supabaseUrl: "", supabaseKey: "" };
 await writeFile(new URL("config.js", out), `// 빌드 시 자동 생성 (scripts/build.mjs)\nwindow.SOAPO_CONFIG = ${JSON.stringify(config, null, 2)};\n`);
 
 console.log(url && key

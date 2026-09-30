@@ -12,7 +12,7 @@ export const configured = Boolean(cfg.supabaseUrl && cfg.supabaseKey);
 // supabase-js는 vendor/ 폴더에 고정 버전으로 들어 있다 (index.html에서 먼저 로드 → window.supabase)
 export const sb = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: true, detectSessionInUrl: true } }) : null;
 
-const empty = () => ({ profile: null, patients: [], notes: [], programs: [], sessions: [], messages: [], appointments: [], symptoms: [], visits: [], reads: {}, names: {}, myLatest: null });
+const empty = () => ({ profile: null, patients: [], notes: [], programs: [], sessions: [], messages: [], appointments: [], symptoms: [], visits: [], prefsById: {}, reads: {}, names: {}, myLatest: null });
 export const cache = empty();
 export function clearCache() { Object.assign(cache, empty()); }
 
@@ -41,7 +41,7 @@ const mapNote = (n) => ({ id: n.id, patientId: n.patient_id, date: n.session_dat
 const mapProgram = (x) => ({ id: x.id, patientId: x.patient_id, title: x.title, detail: x.instructions, target: x.target_count, unit: x.unit, perDay: x.per_day, camera: x.camera_metric, targetAngle: x.target_angle ?? 90 });
 const mapSession = (x) => ({ id: x.id, patientId: x.patient_id, programId: x.program_id, at: x.performed_at, date: localDate(new Date(x.performed_at)), reps: x.reps, maxAngle: x.max_angle, pain: x.pain, comment: x.comment, source: x.source });
 const mapAppt = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, startsAt: x.starts_at, date: localDate(new Date(x.starts_at)), duration: x.duration_min, kind: x.kind, status: x.status, note: x.note });
-const mapVisit = (x) => ({ id: x.id, groupId: x.group_id, goalIds: x.goal_ids ?? [], patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
+const mapVisit = (x) => ({ id: x.id, groupId: x.group_id, goalIds: x.goal_ids ?? [], patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: [], staffNote: null, note: x.note, createdAt: x.created_at });
 const mapSymptom = (x) => ({ id: x.id, patientId: x.patient_id, date: x.logged_on, pain: x.pain, fatigue: x.fatigue, mood: x.mood, sleep: x.sleep, note: x.note });
 function mapPatient(x) {
   return { id: x.id, name: x.name, age: x.birth_year ? new Date().getFullYear() - x.birth_year : null, birthYear: x.birth_year, sex: x.sex, diagnosis: x.diagnosis, onset: x.onset_date,
@@ -93,7 +93,7 @@ export async function loadAll() {
   const apptFrom = new Date(Date.now() - 30 * DAY).toISOString();
   const apptTo = new Date(Date.now() + 90 * DAY).toISOString();
   const isT = cache.profile.role === "therapist";
-  const [pa, go, as, no, pr, se, me, pf, latest, ap, sy, rd, vi] = await Promise.all([
+  const [pa, go, as, no, pr, se, me, pf, latest, ap, sy, rd, vi, vp] = await Promise.all([
     sb.from("patients").select("*").order("created_at"),
     sb.from("goals").select("*").order("created_at"),
     sb.from("assessments").select("*").order("measured_on"),
@@ -101,12 +101,13 @@ export async function loadAll() {
     sb.from("home_programs").select("*").eq("active", true).order("created_at"),
     sb.from("home_sessions").select("*").gte("performed_at", since).order("performed_at"),
     sb.from("messages").select("*").order("created_at", { ascending: false }).limit(500),
-    sb.from("profiles").select("id,name,role,relation"),
+    sb.from("profiles").select("id,name,role,relation,prefs"),
     isT ? Promise.resolve({ data: [] }) : sb.rpc("my_latest_assessment"),
     sb.from("appointments").select("*").gte("starts_at", apptFrom).lte("starts_at", apptTo).order("starts_at"),
     sb.from("symptom_logs").select("*").gte("logged_on", localDate(new Date(Date.now() - 60 * DAY))).order("logged_on"),
     sb.from("thread_reads").select("*"),
     sb.from("visits").select("*").order("visited_on", { ascending: false }).limit(300),
+    isT ? sb.from("visit_private").select("*") : Promise.resolve({ data: [] }),
   ]);
   cache.patients = must(pa).map(mapPatient);
   for (const g of must(go)) view.patient(g.patient_id)?.goals.push(mapGoal(g));
@@ -116,13 +117,18 @@ export async function loadAll() {
   cache.sessions = must(se).map(mapSession);
   cache.messages = must(me).reverse().map(mapMessage);
   cache.names = Object.fromEntries(must(pf).map((x) => [x.id, x.name]));
+  cache.prefsById = Object.fromEntries(must(pf).map((x) => [x.id, x.prefs ?? {}]));   // 환자 앱: 담당 치료사 응답 시간
   const l = must(latest)?.[0];
   cache.myLatest = l ? { date: l.session_date, a: l.a } : null;
   cache.appointments = must(ap).map(mapAppt);
   cache.symptoms = must(sy).map(mapSymptom);
   cache.reads = Object.fromEntries(must(rd).map((x) => [x.patient_id, x.last_read_at]));
   cache.visits = must(vi).map(mapVisit);
+  const priv = Object.fromEntries(must(vp).map((x) => [x.visit_id, x]));
+  for (const v of cache.visits) applyPrivate(v, priv[v.id]);
 }
+/** 치료사 전용 관찰·메모 (환자는 이 테이블을 읽을 수 없다) */
+function applyPrivate(v, x) { v.observations = x?.observations ?? []; v.staffNote = x?.staff_note ?? null; }
 
 /* ---------- 로그인 ---------- */
 const redirectTo = () => location.origin + location.pathname;
@@ -228,7 +234,14 @@ export async function setAppointmentStatus(id, status) {
   must(await sb.from("appointments").update({ status }).eq("id", id));
   const a = cache.appointments.find((x) => x.id === id); if (a) a.status = status;
 }
-const visitBody = (v) => ({ goal_ids: v.goalIds ?? [], appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null });
+const visitBody = (v) => ({ goal_ids: v.goalIds ?? [], appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, note: v.note || null });
+/** 치료사 전용 부분 저장. force면 비어 있어도 저장 (수정할 때 지운 내용 반영) */
+async function savePrivate(pairs, force = false) {
+  const rows = pairs.filter(([, v]) => force || v.observations?.length || v.staffNote)
+    .map(([visit, v]) => ({ visit_id: visit.id, patient_id: visit.patientId, observations: v.observations ?? [], staff_note: v.staffNote || null }));
+  if (rows.length) must(await sb.from("visit_private").upsert(rows, { onConflict: "visit_id" }));
+  for (const [visit, v] of pairs) { visit.observations = v.observations ?? []; visit.staffNote = v.staffNote || null; }
+}
 async function completeAppointments(ids) {
   const todo = cache.appointments.filter((a) => ids.includes(a.id) && a.status === "scheduled");
   if (!todo.length) return;
@@ -239,12 +252,16 @@ async function completeAppointments(ids) {
 export async function addVisits(list) {
   const groupId = list.length > 1 ? crypto.randomUUID() : null;
   const rows = must(await sb.from("visits").insert(list.map((v) => ({ ...visitBody(v), patient_id: v.patientId, group_id: groupId }))).select());
-  cache.visits.push(...rows.map(mapVisit));
+  const visits = rows.map(mapVisit);
+  cache.visits.push(...visits);
+  await savePrivate(visits.map((x) => [x, list.find((v) => v.patientId === x.patientId)]));
   await completeAppointments(list.map((v) => v.appointmentId).filter(Boolean));
 }
 export async function updateVisit(id, v) {
   const row = must(await sb.from("visits").update(visitBody(v)).eq("id", id).select().single());
-  cache.visits = cache.visits.map((x) => (x.id === id ? mapVisit(row) : x));
+  const fresh = mapVisit(row);
+  cache.visits = cache.visits.map((x) => (x.id === id ? fresh : x));
+  await savePrivate([[fresh, v]], true);
   await completeAppointments([v.appointmentId].filter(Boolean));
 }
 export async function deleteVisit(id) {
@@ -265,7 +282,19 @@ export async function markRead(pid) {
 export async function sendMessage(pid, body, kind = "text", triage = null) {
   const row = must(await sb.from("messages").insert({ patient_id: pid, body, kind, triage }).select().single());
   addMessageRow(row);
+  return row;
 }
+/** 상대방 기기로 알림 보내기 (서버 함수). 실패해도 메시지 전송에는 영향 없음 */
+export function notifyMessage(messageId) {
+  if (!cfg.vapidPublicKey) return Promise.resolve();
+  return sb.functions.invoke("notify", { body: { message_id: messageId } }).catch(() => {});
+}
+/** 이 기기의 알림 구독을 서버에 저장 */
+export const savePushSubscription = (sub) => {
+  const j = sub.toJSON();
+  return sb.rpc("save_push_subscription", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth }).then(must);
+};
+export const vapidPublicKey = cfg.vapidPublicKey ?? "";
 /** 새 메시지 행을 캐시에 넣는다 (내가 보낸 것과 실시간으로 받은 것이 겹치지 않게) */
 export function addMessageRow(row) {
   if (cache.messages.some((m) => m.id === row.id)) return false;
