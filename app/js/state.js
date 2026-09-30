@@ -9,7 +9,9 @@ export const state = {
   // 치료사
   tView: "dashboard",      // dashboard | patient | new
   selected: null, tab: "overview", draft: null, draftUsedAI: false,
-  visitAppt: null, visitPrefill: null,   // 내원기록: 연결할 일정, 불러온 지난 기록
+  visitAppt: null, visitPrefill: null, visitEdit: null,   // 내원기록: 연결할 일정, 불러온 지난 기록, 수정 중인 기록
+  draftSavedAt: null,      // SOAP 임시 저장 시각
+  weekOffset: 0,           // 주간 시간표: 이번 주 기준 몇 주 앞/뒤
   // 환자
   ptab: "home", editSymptom: false,
 };

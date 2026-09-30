@@ -8,7 +8,7 @@ import { openCamera } from "./camera.js";
 import { toast, localDate } from "./util.js";
 import { state, intent } from "./state.js";
 import { landingHtml, authHtml, onboardHtml, setupHtml, errorHtml, resetHtml } from "./landing.js";
-import { therapistHtml, railHtml, updateChecks, threadHtml } from "./therapist.js";
+import { therapistHtml, railHtml, updateChecks, threadHtml, openDraft, compareNote } from "./therapist.js";
 import { patientHtml, MOOD, SLEEP } from "./patient.js";
 
 const { cache, view } = D;
@@ -89,7 +89,68 @@ function render() {
     ready: () => (cache.profile.role === "therapist" ? therapistHtml() : patientHtml()) }[state.phase];
   app.innerHTML = r();
   scrollThread();
-  if (state.phase === "ready" && cache.profile.role === "therapist" && state.tView === "patient" && state.tab === "soap") updateChecks();
+  if (state.phase === "ready" && cache.profile.role === "therapist" && state.tView === "patient") {
+    if (state.tab === "soap") updateChecks();
+    if (state.tab === "visits") syncVisitForm();
+  }
+}
+
+/* ---------- SOAP 자동 임시 저장 ---------- */
+let saveTimer = null, saving = null;
+const hasText = (d) => ["s", "o", "a", "p"].some((k) => (d[k] ?? "").trim());
+function draftStatus(d, failed) {
+  const el = document.getElementById("draft-status");
+  if (!el || state.draft !== d) return;
+  el.innerHTML = failed ? `<span style="color:var(--danger)">자동 저장에 실패했습니다. 인터넷 연결을 확인하고 "임시 저장"을 눌러 주세요.</span>`
+    : `임시 저장됨 · ${new Date(state.draftSavedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} · 입력을 멈추면 자동으로 저장됩니다 <button class="linklike" data-act="del-draft">초안 삭제</button>`;
+}
+/** 바뀐 내용이 있을 때만 저장 (d.dirty) */
+async function saveDraftNow(d = state.draft, { quiet = false } = {}) {
+  clearTimeout(saveTimer);
+  if (!d || d.amends || !hasText(d) || (d.id && !d.dirty)) return;
+  while (saving) await saving.catch(() => {});   // 첫 저장이 끝나야 id가 생겨 같은 초안을 덮어쓴다
+  d.dirty = false;
+  saving = D.saveDraft(d, state.draftUsedAI)
+    .then((id) => { d.id = id; state.draftSavedAt = new Date().toISOString(); draftStatus(d); })
+    .catch((e) => { d.dirty = true; if (!quiet) { console.error(e); draftStatus(d, true); } throw e; })
+    .finally(() => { saving = null; });
+  return saving;
+}
+function scheduleAutosave() {
+  const d = state.draft;
+  if (d) d.dirty = true;
+  clearTimeout(saveTimer);
+  if (d && !d.amends) saveTimer = setTimeout(() => saveDraftNow(d).catch(() => {}), 2000);
+}
+/** 비어 있는 칸만 AI 초안으로 채운다. 전부 비어 있었는지 돌려준다 */
+function fillAIDraft(p) {
+  const dr = AI.draftNote(p, { ...view.ctx(p.id), date: state.draft.date });
+  const empty = !hasText(state.draft);
+  for (const k of ["s", "o", "a", "p"]) if (!state.draft[k].trim()) state.draft[k] = dr[k];
+  state.draftUsedAI = true;
+  return empty;
+}
+
+/* ---------- 내원기록 폼: 검색·자주 쓰는 치료·선택 수 ---------- */
+function syncVisitForm() {
+  const f = document.getElementById("f-visit"); if (!f) return;
+  const checked = [...f.querySelectorAll(".vi-on:checked")].map((c) => c.value);
+  const cnt = document.getElementById("vi-count"); if (cnt) cnt.textContent = checked.length ? `${checked.length}개 선택` : "";
+  f.querySelectorAll(".chip[data-code]").forEach((c) => c.setAttribute("aria-pressed", String(checked.includes(c.dataset.code))));
+}
+function filterTreatments(q) {
+  const f = document.getElementById("f-visit"); if (!f) return;
+  q = q.trim().toLowerCase();
+  let shown = 0;
+  f.querySelectorAll(".vcat").forEach((cat) => {
+    let n = 0;
+    cat.querySelectorAll(".vi").forEach((row) => {
+      const ok = !q || row.dataset.search.includes(q) || row.querySelector(".vi-on").checked;
+      row.hidden = !ok; if (ok) n++;
+    });
+    cat.hidden = !n; shown += n;
+  });
+  f.querySelector(".vi-empty").hidden = shown > 0;
 }
 function scrollThread() { const th = app.querySelector(".thread"); if (th) th.scrollTop = th.scrollHeight; }
 
@@ -132,15 +193,45 @@ document.addEventListener("click", async (e) => {
       case "t-dashboard": Object.assign(state, { tView: "dashboard", selected: null }); return render();
       case "new-patient": state.tView = "new"; return render();
       case "pick":
-        if (state.selected !== b.dataset.id) Object.assign(state, { draft: null, tab: "overview", visitAppt: null, visitPrefill: null });
+        if (state.selected !== b.dataset.id) { saveDraftNow().catch(() => {}); Object.assign(state, { draft: null, tab: "overview", visitAppt: null, visitPrefill: null, visitEdit: null }); }
         Object.assign(state, { tView: "patient", selected: b.dataset.id });
         if (state.tab === "msg") openThread(b.dataset.id);
         window.scrollTo({ top: 0 });
         return render();
-      case "tab": state.tab = b.dataset.tab; state.visitPrefill = null; if (state.tab === "msg") openThread(state.selected); return render();
+      case "tab": state.tab = b.dataset.tab; Object.assign(state, { visitPrefill: null, visitEdit: null }); saveDraftNow().catch(() => {}); if (state.tab === "msg") openThread(state.selected); return render();
       case "write-soap":
-        Object.assign(state, { tView: "patient", selected: b.dataset.id, tab: "soap", draft: { patientId: b.dataset.id, date: b.dataset.date, s: "", o: "", a: "", p: "" }, draftUsedAI: false });
+        Object.assign(state, { tView: "patient", selected: b.dataset.id, tab: "soap" });
+        openDraft(b.dataset.id, b.dataset.date);
         return render();
+      case "open-draft": openDraft(p.id, b.dataset.date); state.tab = "soap"; return render();
+      case "save-draft":
+        if (!hasText(state.draft)) return toast("저장할 내용이 없습니다", "error");
+        await run(b, () => saveDraftNow()); return toast("임시 저장했습니다");
+      case "del-draft": {
+        if (!confirm("임시 저장한 초안을 지울까요?")) return;
+        const d = state.draft; clearTimeout(saveTimer); while (saving) await saving.catch(() => {});
+        if (d.id) await run(b, () => D.deleteDraft(d.id));
+        state.draft = { patientId: p.id, date: d.date, s: "", o: "", a: "", p: "" }; state.draftSavedAt = null; state.draftUsedAI = false;
+        toast("초안을 지웠습니다"); return render();
+      }
+      case "amend": {
+        const n = cache.notes.find((x) => x.id === b.dataset.id);
+        const latest = view.notes(p.id).filter((x) => x.amendsId === n.id).sort((a, c) => (c.signedAt ?? "").localeCompare(a.signedAt ?? ""))[0] ?? n;
+        await saveDraftNow().catch(() => {});
+        Object.assign(state, { tab: "soap", draftUsedAI: false, draft: { patientId: p.id, date: n.date, s: latest.s, o: latest.o, a: latest.a, p: latest.p, amends: n.id, reason: "" } });
+        window.scrollTo({ top: 0 }); return render();
+      }
+      case "cancel-amend": openDraft(p.id); return render();
+      case "week": state.weekOffset = b.dataset.dir === "0" ? 0 : state.weekOffset + Number(b.dataset.dir); return render();
+      case "vi-fav": {
+        const box = document.querySelector(`#f-visit .vi-on[value="${b.dataset.code}"]`); if (!box) return;
+        box.checked = !box.checked;
+        const row = box.closest(".vi"); row.hidden = false; row.closest(".vcat").hidden = false;
+        if (box.checked) row.scrollIntoView({ block: "center", behavior: "smooth" });
+        return syncVisitForm();
+      }
+      case "edit-visit": Object.assign(state, { visitEdit: b.dataset.id, visitPrefill: null }); window.scrollTo({ top: 0 }); return render();
+      case "visit-cancel-edit": state.visitEdit = null; return render();
       case "write-visit":
         Object.assign(state, { tView: "patient", selected: b.dataset.id, tab: "visits", visitAppt: b.dataset.appt ?? null, visitPrefill: null });
         window.scrollTo({ top: 0 }); return render();
@@ -160,19 +251,19 @@ document.addEventListener("click", async (e) => {
       case "goal-met": await run(b, () => D.setGoalStatus(p.id, b.dataset.id, "met")); toast("목표를 달성으로 표시했습니다"); return render();
       case "stop-prog": await run(b, () => D.stopProgram(b.dataset.id)); toast("환자 앱에서 이 운동을 내렸습니다"); return render();
       case "ai-draft": {
-        const dr = AI.draftNote(p, { ...view.ctx(p.id), date: state.draft.date });
-        const empty = ["s", "o", "a", "p"].every((k) => !state.draft[k].trim());
-        for (const k of ["s", "o", "a", "p"]) if (!state.draft[k].trim()) state.draft[k] = dr[k];
-        state.draftUsedAI = true;
+        const empty = fillAIDraft(p);
         toast(empty ? "초안을 채웠습니다. [ ] 부분을 직접 확인해 채워 주세요" : "비어 있는 칸만 초안으로 채웠습니다");
-        return render();
+        render(); return scheduleAutosave();
       }
       case "sign": {
-        const check = AI.checkNote(state.draft, view.notes(p.id)[0]);
+        const d = state.draft;
+        if (d.amends && !d.reason?.trim()) return toast("정정 사유를 적어 주세요", "error");
+        const check = AI.checkNote(d, compareNote(d));
         const blockers = check.items.filter((x) => x.level === "danger");
         if (blockers.length) return toast(`필수 항목 ${blockers.length}개를 먼저 해결해 주세요`, "error");
-        await run(b, () => D.signNote(state.draft, check, state.draftUsedAI));
-        state.draft = null; state.tab = "history"; toast("서명하고 저장했습니다"); return render();
+        clearTimeout(saveTimer); while (saving) await saving.catch(() => {});
+        await run(b, () => D.signNote(d, check, state.draftUsedAI));
+        state.draft = null; state.draftSavedAt = null; state.tab = "history"; toast(d.amends ? "정정 기록을 서명하고 저장했습니다" : "서명하고 저장했습니다"); return render();
       }
       case "ai-reply": {
         const input = document.getElementById("msg-text"); if (!input) return;
@@ -204,13 +295,21 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("input", (e) => {
   const t = e.target;
-  if (t.dataset.soap && state.draft) { state.draft[t.dataset.soap] = t.value; updateChecks(); }
-  if (t.id === "soap-date" && state.draft) state.draft.date = t.value || localDate();
+  if (t.dataset.soap && state.draft) { state.draft[t.dataset.soap] = t.value; updateChecks(); scheduleAutosave(); }
+  if (t.id === "soap-date" && state.draft) { state.draft.date = t.value || localDate(); scheduleAutosave(); }
+  if (t.id === "soap-reason" && state.draft) state.draft.reason = t.value;
+  if (t.id === "vi-search") filterTreatments(t.value);
   if (t.type === "range") {
     const out = document.querySelector(`[data-out="${t.id}"]`);
     if (out) out.textContent = t.dataset.names ? t.dataset.names.split("|")[t.value] : t.value;
   }
 });
+
+document.addEventListener("change", (e) => { if (e.target.matches?.("#f-visit .vi-on")) syncVisitForm(); });
+// 검색 칸에서 Enter를 눌러도 내원기록이 저장되지 않게
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "vi-search") e.preventDefault(); });
+// 탭을 닫거나 새로고침하기 전에 SOAP 초안 저장 시도
+window.addEventListener("pagehide", () => { saveDraftNow(state.draft, { quiet: true }).catch(() => {}); });
 
 /* ================= 폼 제출 ================= */
 document.addEventListener("submit", async (e) => {
@@ -281,8 +380,21 @@ document.addEventListener("submit", async (e) => {
       case "f-appt": {
         const startsAt = new Date(`${v("ap-date")}T${v("ap-time")}`);
         if (Number.isNaN(startsAt.getTime())) return toast("날짜와 시간을 확인해 주세요", "error");
-        await run(btn, () => D.addAppointment({ patientId: v("ap-patient"), startsAt: startsAt.toISOString(), duration: parseInt(v("ap-dur")) || 30, kind: v("ap-kind"), note: v("ap-note") }));
-        toast("일정을 추가했습니다"); return render();
+        const base = { patientId: v("ap-patient"), duration: parseInt(v("ap-dur")) || 30, kind: v("ap-kind"), note: v("ap-note") };
+        const starts = [startsAt];
+        if (v("ap-repeat") === "weekly") {
+          const picked = [...f.querySelectorAll("input[name=ap-dow]:checked")].map((c) => +c.value);
+          const dows = picked.length ? picked : [startsAt.getDay()];
+          starts.length = 0;
+          for (let i = 0; i < (parseInt(v("ap-weeks")) || 4) * 7; i++) {
+            const d = new Date(startsAt); d.setDate(startsAt.getDate() + i);
+            if (dows.includes(d.getDay())) starts.push(d);
+          }
+        }
+        if (!starts.length) return toast("반복할 날짜가 없습니다", "error");
+        if (starts.length > 100) return toast("한 번에 100건까지 추가할 수 있습니다", "error");
+        const n = await run(btn, () => D.addAppointments(starts.map((d) => ({ ...base, startsAt: d.toISOString() }))));
+        toast(n > 1 ? `일정 ${n}건을 추가했습니다` : "일정을 추가했습니다"); return render();
       }
       case "f-visit": {
         const num = (name) => { const x = f.elements[name]?.value.trim(); if (!x) return undefined; const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
@@ -294,10 +406,28 @@ document.addEventListener("submit", async (e) => {
         const observations = [...f.querySelectorAll("input[name=obs]:checked")].map((c) => c.value);
         const note = v("vs-note");
         if (!items.length && !note) return toast("한 치료를 하나 이상 체크하거나 메모를 적어 주세요", "error");
-        await run(btn, () => D.addVisit({ patientId: p.id, appointmentId: v("vs-appt"), date: v("vs-date") || localDate(), duration: num("vs-dur") || null, items, observations, note }));
+        const date = v("vs-date") || localDate();
+        const base = { date, duration: num("vs-dur") || null, items, observations, note };
+        if (state.visitEdit) {
+          await run(btn, () => D.updateVisit(state.visitEdit, { ...base, appointmentId: v("vs-appt") }));
+          state.visitEdit = null; window.scrollTo({ top: 0 });
+          toast("내원기록을 수정했습니다"); return render();
+        }
+        // 그룹 치료: 함께 고른 환자는 그 날 아직 기록 없는 일정에 연결
+        const freeAppt = (pid) => cache.appointments.find((a) => a.patientId === pid && a.date === date && a.status !== "cancelled" && !cache.visits.some((x) => x.appointmentId === a.id))?.id ?? null;
+        const mates = [...f.querySelectorAll("input[name=mate]:checked")].map((c) => c.value);
+        const list = [{ ...base, patientId: p.id, appointmentId: v("vs-appt") }, ...mates.map((pid) => ({ ...base, patientId: pid, appointmentId: freeAppt(pid) }))];
+        await run(btn, () => D.addVisits(list));
         Object.assign(state, { visitAppt: null, visitPrefill: null });
         window.scrollTo({ top: 0 });
-        toast(`내원기록을 저장했습니다 (치료 ${items.length}가지)`); return render();
+        const who = mates.length ? ` · 그룹 ${list.length}명` : "";
+        if (btn?.dataset.next === "soap") {
+          state.tab = "soap"; openDraft(p.id, date);
+          const filled = fillAIDraft(p);
+          toast(filled ? `내원기록을 저장하고 SOAP 초안을 채웠습니다${who}. [ ] 부분을 확인해 주세요` : `내원기록을 저장했습니다${who}. 이어 쓰던 초안을 열었습니다`);
+          render(); return scheduleAutosave();
+        }
+        toast(`내원기록을 저장했습니다 (치료 ${items.length}가지${who})`); return render();
       }
       case "f-goal": {
         await run(btn, () => D.addGoal(p.id, { type: v("g-type"), text: v("g-text"), due: v("g-due") }));

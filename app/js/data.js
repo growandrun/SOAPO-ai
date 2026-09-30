@@ -35,11 +35,11 @@ const must = ({ data, error }) => { if (error) throw error; return data; };
 /* ---------- 행 → 화면 모델 ---------- */
 const mapGoal = (g) => ({ id: g.id, patientId: g.patient_id, type: g.type, text: g.text, due: g.due_date, status: g.status });
 const mapScore = (x) => ({ id: x.id, patientId: x.patient_id, date: x.measured_on, tool: x.tool, value: +x.value, max: x.max_value == null ? null : +x.max_value });
-const mapNote = (n) => ({ id: n.id, patientId: n.patient_id, date: n.session_date, author: n.author_id, status: n.status, s: n.s, o: n.o, a: n.a, p: n.p, signedAt: n.signed_at });
+const mapNote = (n) => ({ id: n.id, patientId: n.patient_id, date: n.session_date, author: n.author_id, status: n.status, s: n.s, o: n.o, a: n.a, p: n.p, signedAt: n.signed_at, amendsId: n.amends_id, amendReason: n.amend_reason, createdAt: n.created_at });
 const mapProgram = (x) => ({ id: x.id, patientId: x.patient_id, title: x.title, detail: x.instructions, target: x.target_count, unit: x.unit, perDay: x.per_day, camera: x.camera_metric, targetAngle: x.target_angle ?? 90 });
 const mapSession = (x) => ({ id: x.id, patientId: x.patient_id, programId: x.program_id, at: x.performed_at, date: localDate(new Date(x.performed_at)), reps: x.reps, maxAngle: x.max_angle, pain: x.pain, comment: x.comment, source: x.source });
 const mapAppt = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, startsAt: x.starts_at, date: localDate(new Date(x.starts_at)), duration: x.duration_min, kind: x.kind, status: x.status, note: x.note });
-const mapVisit = (x) => ({ id: x.id, patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
+const mapVisit = (x) => ({ id: x.id, groupId: x.group_id, patientId: x.patient_id, therapistId: x.therapist_id, appointmentId: x.appointment_id, date: x.visited_on, duration: x.duration_min, items: x.items ?? [], observations: x.observations ?? [], note: x.note, createdAt: x.created_at });
 const mapSymptom = (x) => ({ id: x.id, patientId: x.patient_id, date: x.logged_on, pain: x.pain, fatigue: x.fatigue, mood: x.mood, sleep: x.sleep, note: x.note });
 function mapPatient(x) {
   return { id: x.id, name: x.name, age: x.birth_year ? new Date().getFullYear() - x.birth_year : null, birthYear: x.birth_year, sex: x.sex, diagnosis: x.diagnosis, onset: x.onset_date,
@@ -55,7 +55,10 @@ function mapMessage(m) {
 const byTime = (a, b) => a.startsAt.localeCompare(b.startsAt);
 export const view = {
   patient: (id) => cache.patients.find((p) => p.id === id),
-  notes: (pid) => cache.notes.filter((n) => n.patientId === pid).sort((a, b) => b.date.localeCompare(a.date) || (b.signedAt ?? "").localeCompare(a.signedAt ?? "")),
+  /** 서명된 기록 (정정 기록 포함, 임시 저장 제외) */
+  notes: (pid) => cache.notes.filter((n) => n.patientId === pid && n.status !== "draft").sort((a, b) => b.date.localeCompare(a.date) || (b.signedAt ?? "").localeCompare(a.signedAt ?? "")),
+  /** 임시 저장한 SOAP 초안 (날짜를 주면 그 날짜 것만) */
+  draft: (pid, date) => cache.notes.filter((n) => n.patientId === pid && n.status === "draft" && (!date || n.date === date)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null,
   programs: (pid) => cache.programs.filter((x) => x.patientId === pid),
   sessions: (pid) => cache.sessions.filter((x) => x.patientId === pid),
   messages: (pid) => cache.messages.filter((m) => m.patientId === pid),
@@ -162,9 +165,26 @@ export async function addScore(pid, s) {
   const row = must(await sb.from("assessments").insert({ patient_id: pid, tool: s.tool, value: s.value, max_value: s.max ?? null, measured_on: s.date }).select().single());
   view.patient(pid).scores.push(mapScore(row));
 }
+const putNote = (row) => { cache.notes = cache.notes.filter((n) => n.id !== row.id); cache.notes.push(mapNote(row)); return row.id; };
+/** SOAP 임시 저장: 처음이면 새 초안, 이미 있으면 덮어쓴다. 초안 id를 돌려준다 */
+export async function saveDraft(note, aiDraftUsed) {
+  const body = { session_date: note.date, s: note.s, o: note.o, a: note.a, p: note.p, ai_draft_used: aiDraftUsed };
+  const row = note.id
+    ? must(await sb.from("soap_notes").update(body).eq("id", note.id).select().single())
+    : must(await sb.from("soap_notes").insert({ ...body, patient_id: note.patientId, status: "draft" }).select().single());
+  return putNote(row);
+}
+export async function deleteDraft(id) {
+  must(await sb.from("soap_notes").delete().eq("id", id));
+  cache.notes = cache.notes.filter((n) => n.id !== id);
+}
+/** 서명: 임시 저장한 초안이면 그 행을 서명 상태로, 아니면 새로 저장. 정정 기록은 원본 id와 사유를 함께 */
 export async function signNote(note, aiCheck, aiDraftUsed) {
-  const row = must(await sb.from("soap_notes").insert({ patient_id: note.patientId, session_date: note.date, s: note.s, o: note.o, a: note.a, p: note.p, status: "signed", ai_check: aiCheck, ai_draft_used: aiDraftUsed }).select().single());
-  cache.notes.push(mapNote(row));
+  const body = { session_date: note.date, s: note.s, o: note.o, a: note.a, p: note.p, status: "signed", ai_check: aiCheck, ai_draft_used: aiDraftUsed };
+  const row = note.id
+    ? must(await sb.from("soap_notes").update(body).eq("id", note.id).select().single())
+    : must(await sb.from("soap_notes").insert({ ...body, patient_id: note.patientId, amends_id: note.amends ?? null, amend_reason: note.amends ? note.reason : null }).select().single());
+  putNote(row);
 }
 export async function addProgram(pid, x) {
   const row = must(await sb.from("home_programs").insert({ patient_id: pid, title: x.title, instructions: x.detail, target_count: x.target, unit: x.unit ?? "회", per_day: x.perDay ?? 1, camera_metric: x.camera, target_angle: x.targetAngle ?? 90 }).select().single());
@@ -178,20 +198,34 @@ export async function addSession(s) {
   const row = must(await sb.from("home_sessions").insert({ patient_id: s.patientId, program_id: s.programId, reps: s.reps, max_angle: s.maxAngle ?? null, pain: s.pain ?? 0, comment: s.comment || null, source: s.source }).select().single());
   cache.sessions.push(mapSession(row));
 }
-export async function addAppointment(a) {
-  const row = must(await sb.from("appointments").insert({ patient_id: a.patientId, starts_at: a.startsAt, duration_min: a.duration, kind: a.kind, note: a.note || null }).select().single());
-  cache.appointments.push(mapAppt(row));
+/** 일정 여러 개를 한 번에 추가 (반복 일정) */
+export async function addAppointments(list) {
+  const rows = must(await sb.from("appointments").insert(list.map((a) => ({ patient_id: a.patientId, starts_at: a.startsAt, duration_min: a.duration, kind: a.kind, note: a.note || null }))).select());
+  cache.appointments.push(...rows.map(mapAppt));
+  return rows.length;
 }
 export async function setAppointmentStatus(id, status) {
   must(await sb.from("appointments").update({ status }).eq("id", id));
   const a = cache.appointments.find((x) => x.id === id); if (a) a.status = status;
 }
-/** 내원기록 저장. 연결한 일정이 아직 '예정'이면 '완료'로 바꾼다 */
-export async function addVisit(v) {
-  const row = must(await sb.from("visits").insert({ patient_id: v.patientId, appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null }).select().single());
-  cache.visits.push(mapVisit(row));
-  const a = cache.appointments.find((x) => x.id === v.appointmentId);
-  if (a && a.status === "scheduled") await setAppointmentStatus(a.id, "done");
+const visitBody = (v) => ({ appointment_id: v.appointmentId || null, visited_on: v.date, duration_min: v.duration ?? null, items: v.items, observations: v.observations, note: v.note || null });
+async function completeAppointments(ids) {
+  const todo = cache.appointments.filter((a) => ids.includes(a.id) && a.status === "scheduled");
+  if (!todo.length) return;
+  must(await sb.from("appointments").update({ status: "done" }).in("id", todo.map((a) => a.id)));
+  for (const a of todo) a.status = "done";
+}
+/** 내원기록 저장 (그룹 치료면 여러 환자에게 같은 내용으로). 연결한 일정이 '예정'이면 '완료'로 바꾼다 */
+export async function addVisits(list) {
+  const groupId = list.length > 1 ? crypto.randomUUID() : null;
+  const rows = must(await sb.from("visits").insert(list.map((v) => ({ ...visitBody(v), patient_id: v.patientId, group_id: groupId }))).select());
+  cache.visits.push(...rows.map(mapVisit));
+  await completeAppointments(list.map((v) => v.appointmentId).filter(Boolean));
+}
+export async function updateVisit(id, v) {
+  const row = must(await sb.from("visits").update(visitBody(v)).eq("id", id).select().single());
+  cache.visits = cache.visits.map((x) => (x.id === id ? mapVisit(row) : x));
+  await completeAppointments([v.appointmentId].filter(Boolean));
 }
 export async function deleteVisit(id) {
   must(await sb.from("visits").delete().eq("id", id));

@@ -40,7 +40,6 @@ function dashboardHtml() {
   const today = localDate();
   const byTime = (a, b) => a.startsAt.localeCompare(b.startsAt);
   const todays = cache.appointments.filter((a) => a.date === today).sort(byTime);
-  const week = cache.appointments.filter((a) => a.date > today && a.date <= plusDays(7) && a.status === "scheduled").sort(byTime);
   const alerts = pts.flatMap((p) => AI.screen(p, view.ctx(p.id)).map((a) => ({ ...a, p }))).sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
   const dangers = alerts.filter((a) => a.level === "danger").length;
   const unread = pts.reduce((t, p) => t + view.unread(p.id), 0);
@@ -87,16 +86,14 @@ function dashboardHtml() {
         ${alerts.length > 12 ? `<p class="small muted">외 ${alerts.length - 12}건은 환자별 화면에서 볼 수 있습니다.</p>` : ""}
       </section>
 
-      <section class="panel">
+      <section class="panel wide">
         <h2>다가오는 기한 (2주)</h2>
         ${deadlines.length ? `<ul class="deadlines">${deadlines.map((d) => `<li><span class="pill ${d.date < today ? "danger" : d.date <= plusDays(3) ? "warn" : "plain"}">${dday(d.date)}</span><span><button class="linklike" data-act="pick" data-id="${d.p?.id}"><b>${h(d.p?.name ?? "")}</b></button> ${h(d.text)}<br><span class="small muted">${h(d.sub)}</span></span></li>`).join("")}</ul>` : `<p class="muted small">2주 안에 끝나는 목표나 재평가가 없습니다.</p>`}
       </section>
 
-      <section class="panel">
-        <h2>이번 주 일정</h2>
-        ${week.length ? `<ul class="appts">${week.map((a) => apptRow(a, true)).join("")}</ul>` : `<p class="muted small">앞으로 7일간 예정된 치료가 없습니다.</p>`}
-      </section>
     </div>
+
+    ${weekTable()}
 
     <section class="panel">
       <div class="toolbar" style="justify-content:space-between"><h2>환자 현황</h2><span class="small muted">최근 7일 기준</span></div>
@@ -129,15 +126,41 @@ function caseloadTable() {
   return `<div class="tablewrap"><table class="caseload"><thead><tr><th>환자</th><th class="num">운동 수행률</th><th>통증 추이</th><th class="num">평가 점수</th><th class="num">달성 목표</th><th>마지막 SOAP</th><th>다음 치료</th><th>새 메시지</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** 주간 시간표: 월~일 7칸, 칸마다 시간순 일정 */
+function weekTable() {
+  const now = new Date();
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7) + 7 * state.weekOffset);
+  const days = Array.from({ length: 7 }, (_, i) => localDate(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
+  const today = localDate();
+  const byDay = (d) => cache.appointments.filter((a) => a.date === d && a.status !== "cancelled").sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const total = days.reduce((t, d) => t + byDay(d).length, 0);
+  return `<section class="panel">
+    <div class="toolbar" style="justify-content:space-between"><h2>주간 시간표</h2>
+      <div class="toolbar"><button class="btn sm ghost" data-act="week" data-dir="-1" aria-label="지난주">◀</button><span class="small mono">${fmtDate(days[0])} – ${fmtDate(days[6])}</span><button class="btn sm ghost" data-act="week" data-dir="1" aria-label="다음 주">▶</button>${state.weekOffset ? `<button class="btn sm ghost" data-act="week" data-dir="0">이번 주</button>` : ""}<span class="small muted">${total}건</span></div></div>
+    <div class="weekwrap"><div class="week">${days.map((d, i) => `<div class="wday ${d === today ? "is-today" : ""}">
+      <div class="wday-head"><b>${WEEKDAYS[(i + 1) % 7]}</b> <span class="mono small">${fmtDate(d)}</span></div>
+      ${byDay(d).map((a) => `<button class="wslot ${a.status}" data-act="pick" data-id="${a.patientId}" title="${h(KIND[a.kind])} · ${a.duration}분 · ${STATUS[a.status]}"><span class="mono">${fmtTime(a.startsAt)}</span> ${h(view.patient(a.patientId)?.name ?? "")}</button>`).join("") || `<span class="small muted">–</span>`}
+    </div>`).join("")}</div></div>
+  </section>`;
+}
+
 function apptForm(patientId) {
   const opts = cache.patients.map((p) => `<option value="${p.id}" ${p.id === patientId ? "selected" : ""}>${h(p.name)}</option>`).join("");
-  return `<form id="f-appt" class="formgrid" style="margin-top:.6rem">
+  return `<form id="f-appt" class="formgrid appt-form" style="margin-top:.6rem">
     ${patientId ? `<input type="hidden" id="ap-patient" value="${patientId}">` : `<div class="field wide"><label class="label" for="ap-patient">환자</label><select id="ap-patient" required>${opts}</select></div>`}
     <div class="field"><label class="label" for="ap-date">날짜</label><input type="date" id="ap-date" value="${localDate()}" required></div>
     <div class="field"><label class="label" for="ap-time">시간</label><input type="time" id="ap-time" value="10:00" required></div>
     <div class="field"><label class="label" for="ap-kind">종류</label><select id="ap-kind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
     <div class="field"><label class="label" for="ap-dur">시간(분)</label><input type="text" id="ap-dur" inputmode="numeric" value="30"></div>
+    <div class="field"><label class="label" for="ap-repeat">반복</label><select id="ap-repeat"><option value="">반복 안 함</option><option value="weekly">매주 반복</option></select></div>
     <div class="field wide"><label class="label" for="ap-note">메모 (선택)</label><input type="text" id="ap-note" maxlength="200" placeholder="예: 보호자 동반, K-MBI 재평가"></div>
+    <fieldset class="wide repeat-opts"><legend class="label">반복할 요일과 기간</legend>
+      <div class="toolbar">${WEEKDAYS.map((d, i) => `<label class="chk day"><input type="checkbox" name="ap-dow" value="${i}"><span>${d}</span></label>`).join("")}</div>
+      <div class="toolbar"><label class="small" for="ap-weeks">기간</label><select id="ap-weeks">${[1, 2, 3, 4, 6, 8, 12].map((w) => `<option value="${w}" ${w === 4 ? "selected" : ""}>${w}주</option>`).join("")}</select>
+        <span class="small muted">요일을 고르지 않으면 시작 날짜의 요일로 반복합니다.</span></div>
+    </fieldset>
     <div class="wide"><button class="btn primary" type="submit">일정 추가</button></div>
   </form>`;
 }
@@ -261,37 +284,67 @@ function treatmentRow(t, prev) {
       : `<input type="number" name="${name}" min="0" max="${FIELDS[f].max}" step="${FIELDS[f].step}" inputmode="decimal" value="${val}">`;
     return `<label class="vi-f"><span class="small muted">${label}</span>${input}</label>`;
   };
-  return `<div class="vi">
+  return `<div class="vi" data-code="${t.code}" data-search="${h(`${t.label} ${t.code}`.toLowerCase())}">
     <label class="chk"><input type="checkbox" class="vi-on" name="t" value="${t.code}" ${on ? "checked" : ""}><span>${h(t.label)}</span></label>
     <div class="vi-detail">${[...t.fields, "response"].map(fld).join("")}
       <label class="vi-f vi-how"><span class="small muted">방법·메모</span><input type="text" name="${t.code}.how" maxlength="200" value="${h(prev?.how ?? "")}" placeholder="예: 팔꿈치 90도 유지, 테이블 지지"></label></div>
   </div>`;
 }
 
+/** 내가 자주 기록한 치료 (최근 내원기록 기준 상위 8개) */
+function favoriteCodes() {
+  const me = cache.profile.id, n = {};
+  for (const v of cache.visits) if (v.therapistId === me) for (const it of v.items) n[it.code] = (n[it.code] ?? 0) + 1;
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([c]) => c).filter(treatment);
+}
+
+/** 같은 날 함께 기록할 수 있는 다른 환자 (그 날 일정이 있는 환자 먼저) */
+function groupCandidates(p, date) {
+  const hasAppt = (x) => cache.appointments.some((a) => a.patientId === x.id && a.date === date && a.status !== "cancelled");
+  return cache.patients.filter((x) => x.id !== p.id).sort((a, b) => hasAppt(b) - hasAppt(a) || a.name.localeCompare(b.name, "ko")).map((x) => ({ ...x, today: hasAppt(x) }));
+}
+
 function visitForm(p) {
-  const prefill = state.visitPrefill ? cache.visits.find((v) => v.id === state.visitPrefill) : null;
+  const editing = state.visitEdit ? cache.visits.find((v) => v.id === state.visitEdit) : null;
+  const prefill = editing ?? (state.visitPrefill ? cache.visits.find((v) => v.id === state.visitPrefill) : null);
   const byCode = Object.fromEntries((prefill?.items ?? []).map((it) => [it.code, it]));
-  const appts = view.appointments(p.id).filter((a) => a.date <= localDate() && a.date >= localDate(new Date(Date.now() - 30 * DAY)) && a.status !== "cancelled" && !visitLinked(a)).reverse();
-  const pick = state.visitAppt && appts.some((a) => a.id === state.visitAppt) ? state.visitAppt : appts.find((a) => a.date === localDate())?.id ?? "";
+  const appts = view.appointments(p.id).filter((a) => (a.id === editing?.appointmentId) || (a.date <= localDate() && a.date >= localDate(new Date(Date.now() - 30 * DAY)) && a.status !== "cancelled" && !visitLinked(a))).reverse();
+  const pick = editing ? editing.appointmentId ?? "" : state.visitAppt && appts.some((a) => a.id === state.visitAppt) ? state.visitAppt : appts.find((a) => a.date === localDate())?.id ?? "";
   const picked = appts.find((a) => a.id === pick);
+  const date = editing?.date ?? picked?.date ?? localDate();
   const last = view.visits(p.id)[0];
+  const favs = favoriteCodes();
+  const mates = editing ? [] : groupCandidates(p, date);
   return `<form id="f-visit" class="panel visitform">
-    <div class="toolbar" style="justify-content:space-between"><h2>내원기록 작성</h2>
-      ${last ? `<button type="button" class="btn sm ghost" data-act="visit-copy" data-id="${last.id}">지난 기록(${fmtDate(last.date)}) 불러오기</button>` : ""}</div>
-    ${prefill ? `<p class="small muted">${fmtDate(prefill.date)} 기록의 치료 항목과 값을 불러왔습니다. 오늘 한 대로 고쳐 저장하세요. <button type="button" class="linklike" data-act="visit-clear">비우기</button></p>` : ""}
+    <div class="toolbar" style="justify-content:space-between"><h2>${editing ? `${fmtDate(editing.date)} 내원기록 수정` : "내원기록 작성"}</h2>
+      ${editing ? `<button type="button" class="btn sm ghost" data-act="visit-cancel-edit">수정 취소</button>`
+        : last ? `<button type="button" class="btn sm ghost" data-act="visit-copy" data-id="${last.id}">지난 기록(${fmtDate(last.date)}) 불러오기</button>` : ""}</div>
+    ${prefill && !editing ? `<p class="small muted">${fmtDate(prefill.date)} 기록의 치료 항목과 값을 불러왔습니다. 오늘 한 대로 고쳐 저장하세요. <button type="button" class="linklike" data-act="visit-clear">비우기</button></p>` : ""}
     <div class="formgrid">
-      <div class="field"><label class="label" for="vs-date">내원일</label><input type="date" id="vs-date" value="${picked?.date ?? localDate()}" max="${localDate()}" required></div>
+      <div class="field"><label class="label" for="vs-date">내원일</label><input type="date" id="vs-date" value="${date}" max="${localDate()}" required></div>
       <div class="field"><label class="label" for="vs-appt">연결할 일정</label><select id="vs-appt"><option value="">연결 안 함</option>${appts.map((a) => `<option value="${a.id}" ${a.id === pick ? "selected" : ""}>${fmtDay(a.startsAt)} ${fmtTime(a.startsAt)} ${KIND[a.kind]}${a.status === "scheduled" ? " (저장하면 완료 처리)" : ""}</option>`).join("")}</select></div>
       <div class="field"><label class="label" for="vs-dur">치료 시간(분)</label><input type="number" id="vs-dur" min="1" max="480" inputmode="numeric" value="${prefill?.duration ?? picked?.duration ?? 30}"></div>
     </div>
-    <fieldset class="vgroup"><legend>한 치료 <span class="small muted">체크하면 무게·세트·횟수·도움 수준 같은 세부 칸이 열립니다</span></legend>
+    <fieldset class="vgroup"><legend>한 치료 <span class="small muted" id="vi-count"></span></legend>
+      <div class="vtools">
+        <input type="search" id="vi-search" placeholder="치료 검색 (예: 덤벨, 식사, 퍼티)" autocomplete="off" aria-label="치료 검색">
+        ${favs.length ? `<div class="favs"><span class="small muted">자주 쓰는 치료</span>${favs.map((c) => `<button type="button" class="chip" data-act="vi-fav" data-code="${c}" aria-pressed="${Boolean(byCode[c])}">${h(treatment(c).label)}</button>`).join("")}</div>` : ""}
+      </div>
+      <p class="small muted">체크하면 무게·세트·횟수·도움 수준 같은 세부 칸이 열립니다.</p>
       ${GROUPS.map(([g, label]) => `<div class="vcat"><h3>${label}</h3>${TREATMENTS.filter((t) => t.group === g).map((t) => treatmentRow(t, byCode[t.code])).join("")}</div>`).join("")}
+      <p class="small muted vi-empty" hidden>검색한 치료가 없습니다. 메모 칸에 적어 주세요.</p>
     </fieldset>
     <fieldset class="vgroup"><legend>관찰·특이사항</legend>
       <div class="chkgrid">${OBSERVATIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" name="obs" value="${k}" ${prefill?.observations.includes(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>
     </fieldset>
     <div class="field"><label class="label" for="vs-note">메모 (선택)</label><textarea id="vs-note" rows="2" maxlength="2000" placeholder="체크리스트에 없는 치료나 특이사항. 환자·보호자 앱에도 보입니다.">${h(prefill?.note ?? "")}</textarea></div>
-    <div class="toolbar"><button class="btn primary" type="submit">내원기록 저장</button><span class="small muted">저장한 기록은 SOAP 초안의 O(객관적) 칸에 자동으로 들어갑니다.</span></div>
+    ${mates.length ? `<details class="vgroup mates"><summary><b>그룹 치료</b> <span class="small muted">같은 내용을 다른 환자에게도 함께 저장</span></summary>
+      <div class="chkgrid">${mates.map((x) => `<label class="chk"><input type="checkbox" name="mate" value="${x.id}"><span>${h(x.name)}${x.today ? ` <span class="pill plain">${fmtDate(date)} 일정</span>` : ""}</span></label>`).join("")}</div>
+      <p class="small muted">함께 고른 환자에게도 같은 치료·관찰·메모가 저장되고, 그 날 일정이 있으면 연결되어 완료 처리됩니다.</p></details>` : ""}
+    <div class="toolbar visit-actions">
+      ${editing ? `<button class="btn primary" type="submit" data-next="stay">수정 저장</button>`
+        : `<button class="btn primary" type="submit" data-next="soap">저장하고 SOAP 쓰기</button><button class="btn" type="submit" data-next="stay">저장만</button>`}
+      <span class="small muted">저장한 기록은 SOAP 초안의 O(객관적) 칸에 자동으로 들어갑니다.</span></div>
   </form>`;
 }
 
@@ -318,7 +371,7 @@ function tVisits(p) {
     <section class="panel"><h2>내원기록 ${vs.length}건</h2>
       ${vs.length ? vs.map((v) => `<article class="visit">
         <div class="toolbar" style="justify-content:space-between"><strong class="mono">${h(v.date)}</strong>
-          <span class="toolbar" style="gap:.3rem">${v.duration ? `<span class="pill plain">${v.duration}분</span>` : ""}${appt(v.appointmentId) ? `<span class="pill plain">${KIND[appt(v.appointmentId).kind]}</span>` : ""}<button class="btn sm ghost" data-act="del-visit" data-id="${v.id}">삭제</button></span></div>
+          <span class="toolbar" style="gap:.3rem">${v.duration ? `<span class="pill plain">${v.duration}분</span>` : ""}${appt(v.appointmentId) ? `<span class="pill plain">${KIND[appt(v.appointmentId).kind]}</span>` : ""}${v.groupId ? `<span class="pill info">그룹 ${cache.visits.filter((x) => x.groupId === v.groupId).length}명</span>` : ""}<button class="btn sm ghost" data-act="edit-visit" data-id="${v.id}">수정</button><button class="btn sm ghost" data-act="del-visit" data-id="${v.id}">삭제</button></span></div>
         <ul class="vitems">${v.items.map((it) => `<li>${h(itemSummary(it))}</li>`).join("")}</ul>
         ${v.observations.length ? `<div class="flags">${v.observations.map((k) => `<span class="pill ${["fall_risk", "dizzy", "skin", "pain", "early_stop"].includes(k) ? "warn" : "plain"}">${h(observation(k))}</span>`).join("")}</div>` : ""}
         ${v.note ? `<p class="small">${h(v.note)}</p>` : ""}
@@ -328,37 +381,52 @@ function tVisits(p) {
   </div>`;
 }
 
+/** SOAP 작성 화면을 열 때: 같은 날짜의 임시 저장본이 있으면 이어 쓰고, 없으면 빈 초안 */
+export function openDraft(pid, date = localDate()) {
+  const d = view.draft(pid, date) ?? (date === localDate() ? view.draft(pid) : null);
+  state.draft = d ? { id: d.id, patientId: pid, date: d.date, s: d.s, o: d.o, a: d.a, p: d.p } : { patientId: pid, date, s: "", o: "", a: "", p: "" };
+  state.draftUsedAI = false; state.draftSavedAt = d ? d.createdAt : null;
+  return state.draft;
+}
+/** 점검 비교 대상: 정정 기록이면 비교하지 않음 (원본과 비슷한 게 정상) */
+export const compareNote = (d) => (d.amends ? null : view.notes(d.patientId).find((n) => n.id !== d.id) ?? null);
+
 function tSoap(p) {
-  const prev = view.notes(p.id)[0];
-  if (!state.draft || state.draft.patientId !== p.id) { state.draft = { patientId: p.id, date: localDate(), s: "", o: "", a: "", p: "" }; state.draftUsedAI = false; }
+  if (!state.draft || state.draft.patientId !== p.id) openDraft(p.id);
   const d = state.draft;
+  const prev = compareNote(d);
+  const orig = d.amends ? cache.notes.find((n) => n.id === d.amends) : null;
   const row = (k, full, hint) => `<div class="soap-row"><div class="soap-key">${k.toUpperCase()}<small>${full}</small></div>
     <div class="field"><label class="small muted" for="soap-${k}">${hint}</label><textarea id="soap-${k}" data-soap="${k}" rows="4">${h(d[k])}</textarea></div></div>`;
+  const saved = state.draftSavedAt ? new Date(state.draftSavedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
   return `<div class="soapgrid">
     <section class="panel">
-      <div class="toolbar" style="justify-content:space-between"><h2>기록 · <input type="date" id="soap-date" value="${d.date}" style="width:auto;display:inline-block;padding:.2rem .4rem"></h2>
-        <div class="toolbar"><button class="btn" data-act="ai-draft">AI 초안 만들기</button><button class="btn primary" data-act="sign">서명하고 저장</button></div></div>
+      ${orig ? `<div class="amend-banner"><b>${fmtDate(orig.date)} 기록 정정</b><span class="small">원본은 그대로 남고, 정정 기록이 새로 서명되어 함께 보관됩니다. 환자에게는 정정된 평가가 보입니다.</span>
+        <div class="field"><label class="label" for="soap-reason">정정 사유 (필수)</label><input type="text" id="soap-reason" maxlength="500" value="${h(d.reason ?? "")}" placeholder="예: K-MBI 점수 오기 수정 (52 → 55)"></div>
+        <button class="btn sm ghost" data-act="cancel-amend">정정 취소</button></div>` : ""}
+      <div class="toolbar" style="justify-content:space-between"><h2>기록 · <input type="date" id="soap-date" value="${d.date}" style="width:auto;display:inline-block;padding:.2rem .4rem" ${orig ? "disabled" : ""}></h2>
+        <div class="toolbar">${orig ? "" : `<button class="btn" data-act="ai-draft">AI 초안 만들기</button><button class="btn" data-act="save-draft">임시 저장</button>`}<button class="btn primary" data-act="sign">${orig ? "정정 기록 서명" : "서명하고 저장"}</button></div></div>
+      ${orig ? "" : `<p class="small muted draft-status" id="draft-status">${d.id ? `임시 저장됨${saved ? ` · ${saved}` : ""} · 입력을 멈추면 자동으로 저장됩니다 <button class="linklike" data-act="del-draft">초안 삭제</button>` : "입력을 멈추면 자동으로 임시 저장됩니다."}</p>`}
       <div class="soap">
         ${row("s", "주관적", "환자·보호자가 말한 것 (직접 인용)")}
         ${row("o", "객관적", "측정·관찰한 사실: 점수, 각도, 도움 수준, 시간")}
         ${row("a", "평가", "S와 O에 근거한 해석, 목표 대비 진전, 원인, 예후")}
         ${row("p", "계획", "다음에 할 일: 중재, 빈도, 가정 프로그램, 재평가일")}
       </div>
-      <p class="small muted">서명한 기록은 수정하거나 지울 수 없습니다 (의무기록 무결성).</p>
+      <p class="small muted">서명한 기록은 수정하거나 지울 수 없습니다 (의무기록 무결성). 고칠 내용은 "기록 이력"에서 정정 기록으로 남깁니다.</p>
     </section>
     <aside class="panel" style="align-self:start">
       <div class="toolbar" style="justify-content:space-between"><h2>AI 기록 점검</h2><span class="num" id="chk-score"></span></div>
       <div class="meter"><i id="chk-meter" style="width:0"></i></div>
       <div class="checks" id="chk-list"></div>
-      <p class="small muted">입력할 때마다 다시 점검합니다. 비교 대상: ${prev ? `${fmtDate(prev.date)} 기록` : "없음"}</p>
+      <p class="small muted">입력할 때마다 다시 점검합니다. 비교 대상: ${prev ? `${fmtDate(prev.date)} 기록` : orig ? "정정 기록은 비교하지 않음" : "없음"}</p>
     </aside>
   </div>`;
 }
 
 export function updateChecks() {
   if (!state.draft) return;
-  const prev = view.notes(state.selected)[0];
-  const { items, score } = AI.checkNote(state.draft, prev);
+  const { items, score } = AI.checkNote(state.draft, compareNote(state.draft));
   const el = document.getElementById("chk-list"); if (!el) return;
   document.getElementById("chk-score").textContent = `${score}/100`;
   document.getElementById("chk-meter").style.width = score + "%";
@@ -367,10 +435,20 @@ export function updateChecks() {
 }
 
 function tHistory(p) {
-  const ns = view.notes(p.id);
-  return `<section class="panel"><h2>SOAP 기록 ${ns.length}건</h2>${ns.map((n) => `<article class="note">
-    <div class="toolbar" style="justify-content:space-between"><strong class="mono">${h(n.date)}</strong><span class="pill ${n.status === "signed" ? "ok" : "plain"}">${n.status === "signed" ? `서명 · ${h(cache.names[n.author] ?? "")}` : "임시 저장"}</span></div>
-    <dl><dt>S</dt><dd>${h(n.s)}</dd><dt>O</dt><dd>${h(n.o)}</dd><dt>A</dt><dd>${h(n.a)}</dd><dt>P</dt><dd>${h(n.p)}</dd></dl></article>`).join("") || `<p class="muted">아직 기록이 없습니다. "SOAP 작성" 탭에서 첫 기록을 남기세요.</p>`}</section>`;
+  const all = view.notes(p.id);
+  const originals = all.filter((n) => !n.amendsId);
+  const amendsOf = (id) => all.filter((n) => n.amendsId === id).sort((a, b) => (a.signedAt ?? "").localeCompare(b.signedAt ?? ""));
+  const body = (n) => `<dl><dt>S</dt><dd>${h(n.s)}</dd><dt>O</dt><dd>${h(n.o)}</dd><dt>A</dt><dd>${h(n.a)}</dd><dt>P</dt><dd>${h(n.p)}</dd></dl>`;
+  const when = (n) => n.signedAt ? new Date(n.signedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const drafts = cache.notes.filter((n) => n.patientId === p.id && n.status === "draft");
+  return `<section class="panel"><h2>SOAP 기록 ${originals.length}건</h2>
+    ${drafts.length ? `<p class="small">임시 저장한 초안 ${drafts.length}건: ${drafts.map((n) => `<button class="linklike" data-act="open-draft" data-date="${n.date}">${fmtDate(n.date)} 이어 쓰기</button>`).join(" · ")}</p>` : ""}
+    ${originals.map((n) => { const am = amendsOf(n.id); return `<article class="note">
+    <div class="toolbar" style="justify-content:space-between"><strong class="mono">${h(n.date)}</strong>
+      <span class="toolbar" style="gap:.3rem">${am.length ? `<span class="pill warn">정정 ${am.length}회</span>` : ""}<span class="pill ok">서명 · ${h(cache.names[n.author] ?? "")} · ${when(n)}</span><button class="btn sm ghost" data-act="amend" data-id="${n.id}">정정 기록 쓰기</button></span></div>
+    ${am.length ? `${am.map((x) => `<div class="amend"><div class="small"><b>정정 기록</b> · ${when(x)} · ${h(cache.names[x.author] ?? "")} · 사유: ${h(x.amendReason)}</div>${body(x)}</div>`).join("")}
+      <details><summary class="small">원본 보기</summary>${body(n)}</details>` : body(n)}
+  </article>`; }).join("") || `<p class="muted">아직 기록이 없습니다. "SOAP 작성" 탭에서 첫 기록을 남기세요.</p>`}</section>`;
 }
 
 function tHome(p) {

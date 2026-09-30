@@ -1,7 +1,7 @@
 -- 권한(RLS) 테스트. 실행: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(59);
 
 -- 테스트 계정: 치료사 2명(t1, t2), 환자 1명(p1), 가입만 한 사람(x)
 insert into auth.users (id, email) values
@@ -21,6 +21,12 @@ select lives_ok($$ insert into assessments (patient_id, tool, value, max_value) 
 select lives_ok($$ insert into home_programs (patient_id, title, instructions) select id, '어깨 운동', '천천히' from patients $$, '가정 프로그램 처방');
 select lives_ok($$ insert into soap_notes (patient_id, s, o, a, p, status) select id, 's', 'o', '평가 내용', 'p', 'signed' from patients $$, 'SOAP 서명 저장');
 select throws_ok($$ update soap_notes set a = '고침' $$, 'P0001', null, '서명된 SOAP는 수정 불가');
+select lives_ok($$ insert into soap_notes (patient_id, s, status) select id, '임시', 'draft' from patients where name = '테스트환자' $$, 'SOAP 임시 저장');
+select lives_ok($$ update soap_notes set s = '임시 수정' where status = 'draft' $$, '임시 저장한 SOAP는 수정 가능');
+select lives_ok($$ delete from soap_notes where status = 'draft' $$, '임시 저장한 SOAP는 삭제 가능');
+select throws_ok($$ insert into soap_notes (patient_id, s, o, a, p, status, amends_id) select patient_id, 's', 'o', 'a2', 'p', 'signed', id from soap_notes $$, '23514', null, '정정 기록은 사유가 필요');
+select lives_ok($$ insert into soap_notes (patient_id, s, o, a, p, status, amends_id, amend_reason) select patient_id, 's', 'o', '정정한 평가', 'p', 'signed', id, '점수 오기 수정' from soap_notes $$, '서명된 기록에 정정 기록 추가');
+select throws_ok($$ insert into soap_notes (patient_id, s, status, amends_id, amend_reason) select patient_id, 's', 'signed', id, '정정의 정정' from soap_notes where amends_id is not null $$, '42501', null, '정정 기록을 다시 정정할 수 없음 (원본에만)');
 select throws_ok($$ update patients set user_id = auth.uid() $$, '42501', null, '치료사가 환자 계정 연결을 직접 바꿀 수 없음');
 select throws_ok($$ insert into patients (therapist_id, name) values ('00000000-0000-0000-0000-0000000000a2', '남의환자') $$, '42501', null, '다른 치료사 이름으로 환자 등록 불가');
 select lives_ok($$ insert into patients (therapist_id, name) values (auth.uid(), '코드재발급환자') $$, '두 번째 환자 등록');
@@ -50,6 +56,7 @@ select throws_ok($$ insert into appointments (patient_id, starts_at) values (cur
 select is((select count(*) from appointments), 0::bigint, '다른 치료사의 일정은 안 보임');
 select throws_ok($$ insert into visits (patient_id, visited_on) values (current_setting('test.pid')::uuid, current_date) $$, '42501', null, '남의 환자에 내원기록 추가 불가');
 select is((select count(*) from visits), 0::bigint, '다른 치료사의 내원기록은 안 보임');
+select throws_ok($$ insert into soap_notes (patient_id, s, status, amends_id, amend_reason) values (current_setting('test.pid')::uuid, 's', 'signed', gen_random_uuid(), '남의 기록') $$, '42501', null, '남의 환자 기록 정정 불가');
 select lives_ok($$ update patients set birth_date = '2000-01-01' where id = current_setting('test.pid')::uuid $$, '다른 치료사의 수정 시도 (적용되는 행 없음)');
 
 -- ── 환자 p1: 초대 코드로 가입 ────────────────────────────────
@@ -59,6 +66,7 @@ select lives_ok($$ select redeem_invite(current_setting('test.code'), '박영수
 select is((select count(*) from patients), 1::bigint, '가입 후 본인 기록만 보임');
 select is((select count(*) from soap_notes), 0::bigint, '환자는 SOAP 원문을 직접 못 읽음');
 select is((select count(*) from my_latest_assessment()), 1::bigint, '환자는 서명된 평가 요약만 받음');
+select is((select a from my_latest_assessment()), '정정한 평가', '환자는 정정된 최신 평가를 받음');
 select lives_ok($$ insert into home_sessions (patient_id, program_id, reps, pain, source) select patient_id, id, 10, 2, 'manual' from home_programs $$, '환자가 운동 기록 저장');
 select throws_ok($$ insert into goals (patient_id, type, text) select id, 'STG', '내 맘대로' from patients $$, '42501', null, '환자는 목표를 만들 수 없음');
 select lives_ok($$ insert into messages (patient_id, body) select id, '어깨가 당겨요' from patients $$, '환자가 메시지 전송');

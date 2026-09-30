@@ -66,9 +66,17 @@ await T.waitForTimeout(400); await T.fill('#pg-title', '콩 옮기기'); await T
 await T.waitForFunction(() => document.querySelectorAll('.task').length === 2); step('목표·점수·가정 운동 입력');
 await T.click('[data-tab=schedule]'); await T.fill('#ap-date', localDate); await T.fill('#ap-time', '23:50'); await T.selectOption('#ap-kind', 'reevaluation'); await T.fill('#ap-note', 'K-MBI 재평가'); await T.click('#f-appt button[type=submit]');
 await T.waitForSelector('.appts .appt'); step('치료 일정(재평가) 추가');
+// 반복 일정: 오늘이 아닌 두 요일, 2주 → 4건
+const dows = [(today.getDay() + 1) % 7, (today.getDay() + 3) % 7];
+await T.fill('#ap-time', '09:00'); await T.selectOption('#ap-kind', 'session'); await T.fill('#ap-note', ''); await T.selectOption('#ap-repeat', 'weekly');
+for (const d of dows) await T.check(`input[name=ap-dow][value="${d}"]`);
+await T.selectOption('#ap-weeks', '2'); await T.click('#f-appt button[type=submit]');
+await T.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('일정 4건')));
+step('반복 일정 (매주 2개 요일 × 2주 = 4건)');
 await T.click('[data-act=t-dashboard]'); await T.waitForSelector('.tiles');
 console.log('  대시보드 타일:', await text(T, '.tiles'));
 if (!(await text(T, '.deadlines')).includes('재평가')) throw new Error('다가오는 기한에 재평가 없음');
+if (await T.locator('.week .wslot').count() < 2) throw new Error('주간 시간표에 일정이 없음');
 step('치료사 대시보드: 오늘 일정·기한·환자 현황');
 
 // ── 환자 쪽: 보호자로 가입 (?start=patient, 인증 코드) ──
@@ -109,28 +117,51 @@ await T.waitForFunction(() => document.querySelector('.thread')?.textContent.inc
 await T.fill('#msg-text', '통증 없는 범위까지만 해 주세요'); await T.click('#f-msg button');
 await P.waitForFunction(() => document.querySelector('.thread')?.textContent.includes('통증 없는 범위'), null, { timeout: 10000 }); step('보호자 화면에 답장 실시간 도착');
 await T.click('[data-act=t-dashboard]'); await T.click('.appt [data-act=write-visit]'); await T.waitForSelector('#f-visit');
+await T.fill('#vi-search', '덤벨');
+if (!(await T.isHidden('.vi[data-code=eating]')) || !(await T.isVisible('.vi[data-code=dumbbell]'))) throw new Error('치료 검색이 걸러내지 않음');
+await T.fill('#vi-search', ''); step('치료 체크리스트 검색');
 await T.check('input[name=t][value=dumbbell]'); await T.selectOption('select[name="dumbbell.side"]', 'R'); await T.fill('input[name="dumbbell.weight"]', '2'); await T.fill('input[name="dumbbell.sets"]', '3'); await T.fill('input[name="dumbbell.reps"]', '10'); await T.fill('input[name="dumbbell.how"]', '팔꿈치 90도 유지');
 await T.check('input[name=t][value=eating]'); await T.selectOption('select[name="eating.assist"]', 'MinA'); await T.fill('input[name="eating.minutes"]', '15');
 await T.check('input[name=obs][value=guardian]'); await T.check('input[name=obs][value=fall_risk]');
 await shot(T, '7-therapist-visit-form');
-await T.click('#f-visit button[type=submit]'); await T.waitForSelector('.visit');
+await T.click('#f-visit [data-next=stay]'); await T.waitForSelector('.visit');
 const vt = await text(T, '.main');
 for (const want of ['2kg × 3세트 × 10회', '최소 도움 (Min A)', '낙상 위험 관찰', '치료별 변화']) if (!vt.includes(want)) throw new Error(`내원기록에 "${want}" 없음`);
 step('내원기록: 치료 체크리스트 + 측면·무게·세트·횟수·도움 수준 저장');
 await T.click('[data-act=visit-copy]'); await T.waitForFunction(() => document.querySelector('input[name="dumbbell.weight"]')?.value === '2' && document.querySelector('input[name=t][value=dumbbell]').checked);
 await shot(T, '8-therapist-visits'); step('지난 내원기록 불러오기');
+if (!(await T.isVisible('.chip[data-code=dumbbell]'))) throw new Error('자주 쓰는 치료에 덤벨 없음');
+await T.click('[data-act=edit-visit]'); await T.waitForSelector('text=내원기록 수정'); await T.fill('input[name="dumbbell.weight"]', '2.5'); await T.click('#f-visit [data-next=stay]');
+await T.waitForFunction(() => document.querySelector('.visit')?.textContent.includes('2.5kg × 3세트 × 10회')); step('내원기록 수정 (무게 2 → 2.5kg)');
 await T.click('[data-act=t-dashboard]'); await T.waitForSelector('[data-act=write-soap]'); step('내원기록 저장 → 일정 자동 완료 → SOAP 쓰기 버튼');
 await T.click('[data-act=write-soap]'); await T.waitForSelector('#soap-s'); await T.click('[data-act=ai-draft]');
 if (!(await T.inputValue('#soap-s')).includes('컨디션 기록')) throw new Error('SOAP 초안에 컨디션 기록 없음');
-if (!(await T.inputValue('#soap-o')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2kg × 3세트 × 10회')) throw new Error('SOAP 초안 O에 내원기록 없음');
+if (!(await T.inputValue('#soap-o')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2.5kg × 3세트 × 10회')) throw new Error('SOAP 초안 O에 내원기록 없음');
+await T.waitForFunction(() => document.getElementById('draft-status')?.textContent.includes('임시 저장됨'), null, { timeout: 10000 });
+await T.reload({ waitUntil: 'domcontentloaded' }); await T.waitForSelector('.tiles'); await T.click('.rail [data-act=pick]'); await T.click('[data-tab=soap]');
+if (!(await T.inputValue('#soap-s')).includes('컨디션 기록')) throw new Error('새로고침 후 임시 저장한 SOAP가 없음');
+step('SOAP 자동 임시 저장 → 새로고침 후 이어 쓰기');
 await T.click('[data-act=sign]'); await T.waitForSelector('.toast.error'); step('AI 초안(컨디션·내원기록 포함) 그대로는 서명 차단');
 await T.fill('#soap-o', '- K-MBI 55/100 (이전 48)\n- 식사: 변형 숟가락 사용 시 최소 도움(Min A), 15분');
 await T.fill('#soap-a', 'Rt 쥐기 지구력 저하로 식기 조작 제한. K-MBI 7점 향상으로 STG #1에 대해 진전 양호. 컨디션 기록상 통증 7/10으로 강도 조정 필요.');
 await T.click('[data-act=sign]'); await T.waitForSelector('.note'); step('SOAP 서명 저장');
+await T.click('[data-act=amend]'); await T.waitForSelector('#soap-reason'); await T.click('[data-act=sign]');
+await T.waitForFunction(() => [...document.querySelectorAll('.toast.error')].some((t) => t.textContent.includes('정정 사유')));
+await T.fill('#soap-reason', 'K-MBI 이전 점수 오기 수정');
+await T.fill('#soap-a', 'Rt 쥐기 지구력 저하로 식기 조작 제한. K-MBI 향상으로 STG #1 진전 양호(정정 확인). 통증 7/10으로 강도 조정 필요.');
+await T.click('[data-act=sign]'); await T.waitForSelector('.amend');
+if (!(await text(T, '.note')).includes('K-MBI 이전 점수 오기 수정')) throw new Error('정정 사유가 이력에 없음');
+step('서명한 SOAP에 정정 기록 추가 (원본 보존 + 사유)');
+await T.click('[data-act=new-patient]'); await T.fill('#np-name', '김그룹'); await T.fill('#np-birth', '1950-05-05'); await T.click('#f-patient button[type=submit]'); await T.waitForSelector('.phead');
+await T.click('.rail [data-act=pick]'); await T.click('[data-tab=visits]'); await T.check('input[name=t][value=putty]');
+await T.click('details.mates summary'); await T.check('input[name=mate]'); await T.click('#f-visit [data-next=soap]'); await T.waitForSelector('#soap-s');
+if (!(await T.inputValue('#soap-o')).includes('치료용 퍼티')) throw new Error('저장하고 SOAP 쓰기: O에 방금 기록 없음');
+await T.click('[data-tab=visits]'); await T.waitForSelector('text=그룹 2명'); step('그룹 치료 (2명 동시 저장) → 저장하고 바로 SOAP 초안');
 
 await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.papp'); await P.click('[data-tab=records]'); await P.waitForSelector('.plain-summary');
 if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환자 기록에 치료사 평가 없음');
-if (!(await text(P, '.papp')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2kg × 3세트 × 10회')) throw new Error('환자 기록에 치료실에서 한 운동 없음');
+if (!(await text(P, '.papp')).includes('정정 확인')) throw new Error('환자에게 정정된 평가가 보이지 않음');
+if (!(await text(P, '.papp')).includes('덤벨·웨이트 근력 운동 — 오른쪽, 2.5kg × 3세트 × 10회')) throw new Error('환자 기록에 치료실에서 한 운동 없음');
 step('환자 내 기록: 점수·통증 그래프·치료사 평가·치료실에서 한 운동');
 await P.click('[data-act=logout]'); await P.waitForSelector('.hero'); step('로그아웃 → 홈페이지');
 
