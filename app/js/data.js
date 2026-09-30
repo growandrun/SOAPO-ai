@@ -5,6 +5,8 @@
 import { DAY, localDate } from "./util.js";
 
 const cfg = window.SOAPO_CONFIG ?? {};
+/** 비밀번호 재설정 메일 링크로 들어왔는지 (Supabase가 주소를 지우기 전에 기억) */
+export const arrivedForRecovery = /type=recovery/.test(location.hash);
 export const configured = Boolean(cfg.supabaseUrl && cfg.supabaseKey);
 // supabase-js는 vendor/ 폴더에 고정 버전으로 들어 있다 (index.html에서 먼저 로드 → window.supabase)
 export const sb = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: true, detectSessionInUrl: true } }) : null;
@@ -17,6 +19,11 @@ export function clearCache() { Object.assign(cache, empty()); }
 export function explain(err) {
   const m = err?.message ?? String(err);
   if (/rate limit|security purposes|only request this after/i.test(m)) return "메일을 너무 자주 요청했습니다. 1분쯤 뒤에 다시 시도해 주세요.";
+  if (/invalid login credentials/i.test(m)) return "이메일 또는 비밀번호가 맞지 않습니다.";
+  if (/email not confirmed/i.test(m)) return "이메일 인증이 아직 끝나지 않았습니다. 가입할 때 받은 메일의 링크를 누르거나 코드를 입력해 주세요.";
+  if (/already registered|already been registered/i.test(m)) return "이미 가입된 이메일입니다. 로그인하거나 비밀번호 찾기를 이용해 주세요.";
+  if (/password should be|weak password|password.*(short|characters)/i.test(m)) return "비밀번호가 너무 짧거나 쉽습니다. 8자 이상으로, 영문과 숫자를 섞어 주세요.";
+  if (/same password|different from the old/i.test(m)) return "새 비밀번호는 이전 비밀번호와 달라야 합니다.";
   if (/expired|invalid/i.test(m) && /otp|token/i.test(m)) return "코드가 틀렸거나 만료되었습니다. 메일의 최신 코드를 확인하거나 새로 요청해 주세요.";
   if (/Failed to fetch|NetworkError/i.test(m)) return "서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.";
   if (/row-level security|permission denied/i.test(m)) return "이 작업을 할 권한이 없습니다.";
@@ -104,8 +111,21 @@ export async function loadAll() {
 }
 
 /* ---------- 로그인 ---------- */
+const redirectTo = () => location.origin + location.pathname;
 export const auth = {
-  sendLink: (email) => sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } }).then(must),
+  /** 이메일·비밀번호로 가입. 인증 메일 확인이 필요하면 session 없이 돌아온다 */
+  async signUp(email, password) {
+    const data = must(await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo() } }));
+    // 이미 가입된 이메일이면 Supabase는 오류 대신 빈 계정을 돌려준다 (가입 여부 노출 방지)
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) throw new Error("already registered");
+    return data;
+  },
+  signIn: (email, password) => sb.auth.signInWithPassword({ email, password }).then(must),
+  resendSignup: (email) => sb.auth.resend({ type: "signup", email, options: { emailRedirectTo: redirectTo() } }).then(must),
+  verifySignup: (email, token) => sb.auth.verifyOtp({ email, token, type: "signup" }).then(must),
+  sendReset: (email) => sb.auth.resetPasswordForEmail(email, { redirectTo: redirectTo() }).then(must),
+  setPassword: (password) => sb.auth.updateUser({ password }).then(must),
+  sendLink: (email) => sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo(), shouldCreateUser: false } }).then(must),
   verifyCode: (email, token) => sb.auth.verifyOtp({ email, token, type: "email" }).then(must),
   signOut: () => sb.auth.signOut(),
   registerTherapist: (name, license) => sb.rpc("register_therapist", { p_name: name, p_license: license }).then(must),

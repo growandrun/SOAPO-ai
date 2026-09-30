@@ -8,7 +8,7 @@ export function landingHtml() {
   return `<div class="landing">
   <header class="lnav">
     ${brand()}
-    <nav class="toolbar"><a class="btn ghost" href="demo/">데모 보기</a><button class="btn" data-act="go-auth" data-mode="login">로그인</button></nav>
+    <nav class="toolbar"><button class="btn" data-act="go-auth" data-mode="login">로그인</button></nav>
   </header>
 
   <section class="hero">
@@ -75,48 +75,103 @@ export function landingHtml() {
 
   <footer class="lfoot small muted">
     <span>SOAPO.ai · 교육·연구용 서비스입니다. 응급 상황은 119에 연락하세요.</span>
-    <a href="demo/">가짜 데이터로 먼저 둘러보기</a>
   </footer>
 </div>`;
 }
 
 const AUTH_TEXT = {
-  login: { title: "로그인", desc: "가입할 때 쓴 이메일을 입력하세요." },
-  patient: { title: "환자·보호자 가입", desc: "담당 작업치료사에게 받은 초대 코드가 필요합니다. 이메일 인증을 마치면 코드를 입력합니다." },
-  therapist: { title: "작업치료사 가입", desc: "이메일 인증을 마치면 이름과 면허 번호를 입력합니다. 가입 후 환자를 등록하고 초대 코드를 보낼 수 있습니다." },
+  login: { title: "로그인", desc: "가입할 때 쓴 이메일과 비밀번호를 입력하세요." },
+  patient: { title: "환자·보호자 가입", desc: "이메일과 비밀번호를 정하고 이메일 인증을 마치면, 담당 작업치료사에게 받은 초대 코드를 입력합니다." },
+  therapist: { title: "작업치료사 가입", desc: "이메일과 비밀번호를 정하고 이메일 인증을 마치면, 이름과 면허 번호를 입력합니다." },
 };
+const pwHint = "8자 이상, 영문과 숫자를 섞어 주세요.";
+const codeForm = (id, label = "인증 코드") => `<form id="${id}" class="field" style="gap:.6rem">
+    <label class="label" for="otp">${label}</label>
+    <input type="text" id="otp" class="code-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10" required placeholder="숫자 코드">
+    <button class="btn primary" type="submit">확인</button>
+  </form>`;
+
+function authBody() {
+  const t = AUTH_TEXT[state.authMode];
+  const email = `<div class="field"><label class="label" for="email">이메일</label><input type="email" id="email" required placeholder="you@example.com" value="${h(state.email)}" autocomplete="email"></div>`;
+  switch (state.authStep) {
+    case "form":
+      return state.authMode === "login"
+        ? `<form class="card" id="f-login">
+            <h2>${t.title}</h2><p class="small muted">${t.desc}</p>
+            ${email}
+            <div class="field"><label class="label" for="password">비밀번호</label><input type="password" id="password" required autocomplete="current-password"></div>
+            <button class="btn primary" type="submit">로그인</button>
+            <div class="toolbar small"><button type="button" class="linklike" data-act="auth-step" data-step="forgot">비밀번호를 잊었나요?</button><span class="muted">·</span><button type="button" class="linklike" data-act="auth-step" data-step="code-email">메일로 받은 코드로 로그인</button></div>
+          </form>`
+        : `<form class="card" id="f-signup">
+            <h2>${t.title}</h2><p class="small muted">${t.desc}</p>
+            ${email}
+            <div class="field"><label class="label" for="password">비밀번호</label><input type="password" id="password" required minlength="8" autocomplete="new-password" aria-describedby="pw-hint"><span class="small muted" id="pw-hint">${pwHint}</span></div>
+            <div class="field"><label class="label" for="password2">비밀번호 확인</label><input type="password" id="password2" required minlength="8" autocomplete="new-password"></div>
+            <button class="btn primary" type="submit">가입하기</button>
+          </form>`;
+    case "confirm":
+      return `<div class="card">
+          <h2>이메일을 인증해 주세요</h2>
+          <p><span class="mono">${h(state.email)}</span>로 인증 메일을 보냈습니다. 스팸함도 확인해 주세요.</p>
+          <p class="small muted">이 기기에서 메일의 링크를 누르면 바로 넘어갑니다. 다른 기기에서 메일을 열었다면 메일 속 인증 코드를 입력하세요.</p>
+          ${codeForm("f-signup-code")}
+          <div class="toolbar"><button class="btn ghost" data-act="resend-signup">메일 다시 보내기</button><button class="btn ghost" data-act="auth-step" data-step="form">처음으로</button></div>
+        </div>`;
+    case "code-email":
+      return `<form class="card" id="f-code-email">
+          <h2>메일 코드로 로그인</h2><p class="small muted">비밀번호 없이, 메일로 받은 코드나 링크로 로그인합니다. 이미 가입한 이메일만 쓸 수 있습니다.</p>
+          ${email}
+          <button class="btn primary" type="submit">로그인 메일 받기</button>
+          <button type="button" class="linklike" data-act="auth-step" data-step="form">비밀번호로 로그인</button>
+        </form>`;
+    case "code-sent":
+      return `<div class="card">
+          <h2>메일을 확인하세요</h2>
+          <p><span class="mono">${h(state.email)}</span>로 로그인 메일을 보냈습니다.</p>
+          ${codeForm("f-code")}
+          <div class="toolbar"><button class="btn ghost" data-act="resend">메일 다시 보내기</button><button class="btn ghost" data-act="auth-step" data-step="form">비밀번호로 로그인</button></div>
+        </div>`;
+    case "forgot":
+      return `<form class="card" id="f-forgot">
+          <h2>비밀번호 찾기</h2><p class="small muted">가입한 이메일로 비밀번호를 다시 정하는 링크를 보내 드립니다.</p>
+          ${email}
+          <button class="btn primary" type="submit">재설정 메일 받기</button>
+          <button type="button" class="linklike" data-act="auth-step" data-step="form">로그인으로 돌아가기</button>
+        </form>`;
+    case "forgot-sent":
+      return `<div class="card">
+          <h2>메일을 확인하세요</h2>
+          <p><span class="mono">${h(state.email)}</span>로 비밀번호 재설정 링크를 보냈습니다. 링크를 누르면 새 비밀번호를 정하는 화면이 열립니다.</p>
+          <p class="small muted">가입하지 않은 이메일이면 메일이 가지 않습니다.</p>
+          <button class="btn ghost" data-act="auth-step" data-step="form">로그인으로 돌아가기</button>
+        </div>`;
+  }
+  return "";
+}
 
 export function authHtml() {
-  const t = AUTH_TEXT[state.authMode];
-  const body = state.authStep === "email"
-    ? `<form class="card" id="f-email">
-        <h2>${t.title}</h2>
-        <p class="small muted">${t.desc}</p>
-        <div class="field"><label class="label" for="email">이메일</label>
-          <input type="email" id="email" required placeholder="you@example.com" value="${h(state.email)}" autocomplete="email"></div>
-        <button class="btn primary" type="submit">인증 메일 받기</button>
-        <p class="small muted">비밀번호는 필요 없습니다. 메일로 받은 링크를 누르거나 인증 코드를 입력하면 됩니다.</p>
-      </form>`
-    : `<div class="card">
-        <h2>메일을 확인하세요</h2>
-        <p><span class="mono">${h(state.email)}</span>로 인증 메일을 보냈습니다. 스팸함도 확인해 주세요.</p>
-        <p class="small muted">이 기기에서 메일의 링크를 누르면 바로 넘어갑니다. 다른 기기에서 메일을 열었다면 메일 속 인증 코드(숫자)를 아래에 입력하세요.</p>
-        <form id="f-code" class="field" style="gap:.6rem">
-          <label class="label" for="otp">인증 코드</label>
-          <input type="text" id="otp" class="code-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10" required placeholder="숫자 코드">
-          <button class="btn primary" type="submit">확인</button>
-        </form>
-        <div class="toolbar"><button class="btn ghost" data-act="resend">메일 다시 보내기</button><button class="btn ghost" data-act="auth-back">이메일 바꾸기</button></div>
-      </div>`;
-  const switcher = state.authMode === "login"
+  const switcher = state.authStep !== "form" ? "" : state.authMode === "login"
     ? `<p class="small muted">처음이신가요? <button class="linklike" data-act="go-auth" data-mode="patient">환자·보호자 가입</button> · <button class="linklike" data-act="go-auth" data-mode="therapist">작업치료사 가입</button></p>`
     : `<p class="small muted">이미 가입했나요? <button class="linklike" data-act="go-auth" data-mode="login">로그인</button></p>`;
   return `<main class="auth">
     <button class="linklike back" data-act="go-home">← 처음 화면</button>
     ${brand("big")}
-    ${body}
-    ${state.authStep === "email" ? switcher : ""}
+    ${authBody()}
+    ${switcher}
   </main>`;
+}
+
+/** 비밀번호 재설정 링크로 들어왔을 때: 새 비밀번호 정하기 (로그인 후 설정에서도 사용) */
+export function resetHtml() {
+  return `<main class="auth">${brand("big")}
+    <form class="card" id="f-newpw">
+      <h2>새 비밀번호 정하기</h2><p class="small muted mono">${h(state.email)}</p>
+      <div class="field"><label class="label" for="newpw">새 비밀번호</label><input type="password" id="newpw" required minlength="8" autocomplete="new-password"><span class="small muted">${pwHint}</span></div>
+      <div class="field"><label class="label" for="newpw2">새 비밀번호 확인</label><input type="password" id="newpw2" required minlength="8" autocomplete="new-password"></div>
+      <button class="btn primary" type="submit">비밀번호 저장</button>
+    </form></main>`;
 }
 
 export function onboardHtml() {
@@ -146,8 +201,7 @@ export function onboardHtml() {
 
 export function setupHtml() {
   return `<main class="auth"><div class="card"><h2>서버 연결이 필요합니다</h2>
-    <p class="small">아직 Supabase가 연결되지 않았습니다. README의 "실제 서비스로 올리기"를 따라 설정하세요.</p>
-    <p class="small">그동안 <a href="demo/">데모</a>에서 가짜 데이터로 기능을 체험할 수 있습니다.</p></div></main>`;
+    <p class="small">아직 Supabase가 연결되지 않았습니다. README의 "실제 서비스로 올리기"를 따라 설정하세요.</p></div></main>`;
 }
 
 export function errorHtml() {

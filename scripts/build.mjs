@@ -1,6 +1,5 @@
 /* 배포용 사이트를 dist/ 에 만든다 (Vercel이 배포할 때 실행)
    dist/        실제 서비스 앱 (app/)
-   dist/demo/   가짜 데이터 데모 (prototype/)
    dist/config.js 는 환경 변수로 만든다. 값이 없으면 앱이 "설정 필요" 화면을 보여 준다.
 
    읽는 환경 변수 (앞에 있는 것이 우선)
@@ -34,13 +33,12 @@ if (url && !/^https?:\/\//.test(url)) {
 }
 
 await rm(out, { recursive: true, force: true });
-await mkdir(new URL("demo/", out), { recursive: true });
+await mkdir(out, { recursive: true });
 await cp(new URL("app/", root), out, { recursive: true });
-await cp(new URL("prototype/index.html", root), new URL("demo/index.html", out));
 
 const config = url && key ? { supabaseUrl: url, supabaseKey: key } : { supabaseUrl: "", supabaseKey: "" };
 await writeFile(new URL("config.js", out), `// 빌드 시 자동 생성 (scripts/build.mjs)\nwindow.SOAPO_CONFIG = ${JSON.stringify(config, null, 2)};\n`);
 
 console.log(url && key
   ? `✓ dist/ 생성, Supabase ${url} 에 연결 (${fromEnv ? "환경 변수" : "supabase/production.json"})`
-  : "✓ dist/ 생성 (Supabase 환경 변수가 없어 설정 안내 화면으로 배포됩니다. /demo/ 는 그대로 동작)");
+  : "✓ dist/ 생성 (Supabase 환경 변수가 없어 설정 안내 화면으로 배포됩니다.)");

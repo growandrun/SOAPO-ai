@@ -35,10 +35,17 @@ const text = async (pg, sel) => (await pg.textContent(sel)).replace(/\s+/g, ' ')
 
 // ── 홈페이지 → 치료사 가입 (메일 링크) ──
 await T.goto(APP, { waitUntil: 'domcontentloaded' }); await T.waitForSelector('.hero h1'); await shot(T, '1-home'); step('홈페이지 표시');
-await T.click('.cta [data-mode=therapist]'); await T.waitForSelector('#f-email');
-if (!(await text(T, '#f-email h2')).includes('작업치료사 가입')) throw new Error('치료사 가입 화면 아님');
-await T.fill('#email', 'ot.kim@test.kr'); await T.click('#f-email button[type=submit]');
-await T.waitForSelector('#otp'); const tm = await mail('ot.kim@test.kr'); step(`인증 메일 "${tm.subject}", 코드 ${tm.code.length}자리`);
+if (await T.$('a[href="demo/"]')) throw new Error('데모 링크가 남아 있음');
+await T.click('.cta [data-mode=therapist]'); await T.waitForSelector('#f-signup');
+if (!(await text(T, '#f-signup h2')).includes('작업치료사 가입')) throw new Error('치료사 가입 화면 아님');
+const T_PW = 'Soapo2026';
+await T.fill('#email', 'ot.kim@test.kr'); await T.fill('#password', 'abcdefgh'); await T.fill('#password2', 'abcdefgh'); await T.click('#f-signup button[type=submit]');
+await T.waitForSelector('.toast.error'); if (!(await text(T, '.toast.error')).includes('영문과 숫자')) throw new Error('약한 비밀번호가 통과됨');
+await T.fill('#password', T_PW); await T.fill('#password2', T_PW + 'x'); await T.click('#f-signup button[type=submit]');
+await T.waitForFunction(() => [...document.querySelectorAll('.toast.error')].some((t) => t.textContent.includes('일치하지')));
+step('비밀번호 규칙 검사 (영문+숫자 8자 이상, 확인 일치)');
+await T.fill('#password2', T_PW); await T.click('#f-signup button[type=submit]');
+await T.waitForSelector('#f-signup-code'); const tm = await mail('ot.kim@test.kr'); step(`이메일·비밀번호 가입 → 인증 메일 "${tm.subject}"`);
 await T.goto(tm.link, { waitUntil: 'domcontentloaded' }); await T.waitForSelector('#f-onboard');
 if ((await T.getAttribute('[data-role=therapist]', 'aria-pressed')) !== 'true') throw new Error('치료사 유형이 미리 선택되지 않음');
 step('메일 링크 → 가입 마무리 (치료사 미리 선택됨)');
@@ -63,11 +70,12 @@ if (!(await text(T, '.deadlines')).includes('재평가')) throw new Error('다�
 step('치료사 대시보드: 오늘 일정·기한·환자 현황');
 
 // ── 환자 쪽: 보호자로 가입 (?start=patient, 인증 코드) ──
-await P.goto(APP + '?start=patient', { waitUntil: 'domcontentloaded' }); await P.waitForSelector('#f-email');
-if (!(await text(P, '#f-email h2')).includes('환자·보호자 가입')) throw new Error('환자 가입 화면 아님');
-await P.fill('#email', 'guardian.park@test.kr'); await P.click('#f-email button[type=submit]');
-await P.waitForSelector('#otp'); const pm = await mail('guardian.park@test.kr');
-await P.fill('#otp', pm.code); await P.click('#f-code button'); await P.waitForSelector('#f-onboard'); step('인증 코드로 확인');
+await P.goto(APP + '?start=patient', { waitUntil: 'domcontentloaded' }); await P.waitForSelector('#f-signup');
+if (!(await text(P, '#f-signup h2')).includes('환자·보호자 가입')) throw new Error('환자 가입 화면 아님');
+const P_PW = 'Guard1an99';
+await P.fill('#email', 'guardian.park@test.kr'); await P.fill('#password', P_PW); await P.fill('#password2', P_PW); await P.click('#f-signup button[type=submit]');
+await P.waitForSelector('#f-signup-code'); const pm = await mail('guardian.park@test.kr');
+await P.fill('#otp', pm.code); await P.click('#f-signup-code button'); await P.waitForSelector('#f-onboard'); step('보호자 이메일·비밀번호 가입 → 메일 코드로 인증');
 await P.click('[data-relation=guardian]'); await P.fill('#ob-name', '박보호'); await P.fill('#ob-invite', 'SOAP-XXXXXX'); await P.check('#ob-consent'); await P.click('#f-onboard button[type=submit]');
 await P.waitForSelector('.toast.error'); step('틀린 초대 코드 거부');
 await P.fill('#ob-invite', invite.toLowerCase()); await P.click('#f-onboard button[type=submit]');
@@ -110,8 +118,23 @@ await P.reload({ waitUntil: 'domcontentloaded' }); await P.waitForSelector('.pap
 if (!(await text(P, '.papp')).includes('치료사 평가')) throw new Error('환자 기록에 치료사 평가 없음');
 step('환자 내 기록: 점수·통증 그래프·치료사 평가');
 await P.click('[data-act=logout]'); await P.waitForSelector('.hero'); step('로그아웃 → 홈페이지');
+
+// ── 비밀번호 로그인, 틀린 비밀번호, 비밀번호 찾기 ──
+await P.click('.lnav [data-mode=login]'); await P.waitForSelector('#f-login');
+await P.fill('#email', 'guardian.park@test.kr'); await P.fill('#password', 'Wrong1234'); await P.click('#f-login button[type=submit]');
+await P.waitForSelector('.toast.error'); if (!(await text(P, '.toast.error')).includes('맞지 않습니다')) throw new Error('틀린 비밀번호 안내 없음');
+await P.fill('#password', P_PW); await P.click('#f-login button[type=submit]'); await P.waitForSelector('.pcards'); step('틀린 비밀번호 거부 → 올바른 비밀번호로 로그인');
+await T.click('[data-act=logout]'); await T.waitForSelector('.hero');
+await T.click('.lnav [data-mode=login]'); await T.click('[data-step=forgot]'); await T.fill('#email', 'ot.kim@test.kr'); await T.click('#f-forgot button[type=submit]');
+await T.waitForSelector('[data-step=form]'); await sleep(800); const rm = await mail('ot.kim@test.kr');
+if (!rm.subject.includes('비밀번호')) throw new Error('재설정 메일이 아님: ' + rm.subject);
+await T.goto(rm.link, { waitUntil: 'domcontentloaded' }); await T.waitForSelector('#f-newpw');
+await T.fill('#newpw', 'NewPass2027'); await T.fill('#newpw2', 'NewPass2027'); await T.click('#f-newpw button[type=submit]'); await T.waitForSelector('.tiles');
+await T.click('[data-act=logout]'); await T.waitForSelector('.hero'); await T.click('.lnav [data-mode=login]');
+await T.fill('#email', 'ot.kim@test.kr'); await T.fill('#password', 'NewPass2027'); await T.click('#f-login button[type=submit]'); await T.waitForSelector('.tiles');
+step('비밀번호 찾기 → 재설정 메일 → 새 비밀번호로 로그인');
 await b.close();
 // 실시간 연결은 끊기면 자동으로 다시 연결된다. 실제로 안 되면 위의 "실시간 도착" 단계가 실패한다.
-const unexpected = errs.filter((e) => !/초대 코드|400 \(Bad Request\)|ERR_TOO_MANY_RETRIES|ERR_CERT|net::ERR|WebSocket connection to/.test(e));
+const unexpected = errs.filter((e) => !/초대 코드|400 \(Bad Request\)|ERR_TOO_MANY_RETRIES|ERR_CERT|net::ERR|WebSocket connection to|Invalid login credentials/.test(e)); // 마지막: 틀린 비밀번호 시험은 일부러 하는 것
 if (unexpected.length) { console.error('예상하지 못한 오류:', unexpected); process.exit(1); }
 console.log('모든 단계 통과');

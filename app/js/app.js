@@ -7,7 +7,7 @@ import * as AI from "./ai.js";
 import { openCamera } from "./camera.js";
 import { toast, localDate } from "./util.js";
 import { state, intent } from "./state.js";
-import { landingHtml, authHtml, onboardHtml, setupHtml, errorHtml } from "./landing.js";
+import { landingHtml, authHtml, onboardHtml, setupHtml, errorHtml, resetHtml } from "./landing.js";
 import { therapistHtml, railHtml, updateChecks, threadHtml } from "./therapist.js";
 import { patientHtml, MOOD, SLEEP } from "./patient.js";
 
@@ -27,14 +27,16 @@ function boot() {
     toast(hp.get("error_code") === "otp_expired" ? "인증 링크가 만료되었습니다. 새 메일을 요청하거나 메일 속 코드를 입력해 주세요." : hp.get("error_description"), "error");
     history.replaceState(null, "", location.pathname);
   }
+  if (D.arrivedForRecovery) state.recovery = true;
   D.sb.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") state.recovery = true;
     // 콜백 안에서 바로 Supabase를 다시 부르면 멈출 수 있어 다음 틱으로 넘긴다
     setTimeout(() => onSession(session), 0);
   });
 }
 
 function goAuth(mode, doRender = true) {
-  Object.assign(state, { phase: "auth", authMode: mode, authStep: "email" });
+  Object.assign(state, { phase: "auth", authMode: mode, authStep: "form" });
   if (mode !== "login") intent.set({ role: mode === "therapist" ? "therapist" : "patient" });
   if (doRender) render();
 }
@@ -48,6 +50,8 @@ async function onSession(session) {
   }
   if (uid === state.userId && state.phase !== "error") return; // 토큰 갱신 등
   state.userId = uid; state.email = session.user.email ?? "";
+  // 비밀번호 재설정 링크로 들어온 경우: 먼저 새 비밀번호를 정한다
+  if (state.recovery) { state.phase = "reset"; return render(); }
   state.phase = "loading"; render();
   try {
     const profile = await D.loadProfile(uid);
@@ -81,7 +85,7 @@ function onNewMessage(row) {
 
 /* ================= 그리기 ================= */
 function render() {
-  const r = { loading: () => `<div class="loading">불러오는 중…</div>`, setup: setupHtml, landing: landingHtml, auth: authHtml, onboard: onboardHtml, error: errorHtml,
+  const r = { loading: () => `<div class="loading">불러오는 중…</div>`, setup: setupHtml, landing: landingHtml, auth: authHtml, reset: resetHtml, onboard: onboardHtml, error: errorHtml,
     ready: () => (cache.profile.role === "therapist" ? therapistHtml() : patientHtml()) }[state.phase];
   app.innerHTML = r();
   scrollThread();
@@ -100,6 +104,14 @@ async function run(btn, fn) {
 const currentPatient = () => (state.phase !== "ready" ? null : cache.profile.role === "therapist" ? view.patient(state.selected) : cache.patients[0]);
 const openThread = (pid) => { D.markRead(pid).catch(() => {}); };
 
+/** 비밀번호 규칙: 8자 이상, 영문과 숫자 포함, 확인 칸과 같아야 함 */
+function checkPassword(pw, again) {
+  if (pw.length < 8) return "비밀번호는 8자 이상이어야 합니다.";
+  if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) return "비밀번호에 영문과 숫자를 모두 넣어 주세요.";
+  if (pw !== again) return "비밀번호 확인이 일치하지 않습니다.";
+  return null;
+}
+
 /* ================= 클릭 ================= */
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-act]"); if (!b) return;
@@ -111,7 +123,8 @@ document.addEventListener("click", async (e) => {
       case "go-home": state.phase = "landing"; return render();
       case "logout": await D.auth.signOut(); state.phase = "landing"; return render();
       case "retry": state.userId = null; return onSession((await D.sb.auth.getSession()).data.session);
-      case "auth-back": state.authStep = "email"; return render();
+      case "auth-step": state.authStep = b.dataset.step; return render();
+      case "resend-signup": await run(b, () => D.auth.resendSignup(state.email)); return toast("인증 메일을 다시 보냈습니다");
       case "resend": await run(b, () => D.auth.sendLink(state.email)); return toast("메일을 다시 보냈습니다");
       case "role": state.role = b.dataset.role; return render();
       case "relation": state.relation = b.dataset.relation; return render();
@@ -199,10 +212,41 @@ document.addEventListener("submit", async (e) => {
   const p = currentPatient();
   try {
     switch (f.id) {
-      case "f-email": {
+      case "f-signup": {
+        state.email = v("email").toLowerCase();
+        const pw = f.querySelector("#password").value, bad = checkPassword(pw, f.querySelector("#password2").value);
+        if (bad) return toast(bad, "error");
+        const data = await run(btn, () => D.auth.signUp(state.email, pw));
+        if (!data.session) { state.authStep = "confirm"; render(); }
+        return; // 인증 없이 바로 로그인되는 설정이면 onAuthStateChange가 이어서 처리
+      }
+      case "f-signup-code": {
+        await run(btn, () => D.auth.verifySignup(state.email, v("otp").replace(/\s+/g, "")));
+        return;
+      }
+      case "f-login": {
+        state.email = v("email").toLowerCase();
+        try { await run(btn, () => D.auth.signIn(state.email, f.querySelector("#password").value)); }
+        catch (err) { if (/email not confirmed/i.test(err?.message ?? "")) { state.authStep = "confirm"; render(); } }
+        return;
+      }
+      case "f-forgot": {
+        state.email = v("email").toLowerCase();
+        await run(btn, () => D.auth.sendReset(state.email));
+        state.authStep = "forgot-sent"; return render();
+      }
+      case "f-newpw": {
+        const pw = f.querySelector("#newpw").value, bad = checkPassword(pw, f.querySelector("#newpw2").value);
+        if (bad) return toast(bad, "error");
+        await run(btn, () => D.auth.setPassword(pw));
+        state.recovery = false; state.userId = null;
+        toast("새 비밀번호를 저장했습니다");
+        return onSession((await D.sb.auth.getSession()).data.session);
+      }
+      case "f-code-email": {
         state.email = v("email").toLowerCase();
         await run(btn, () => D.auth.sendLink(state.email));
-        state.authStep = "sent"; return render();
+        state.authStep = "code-sent"; return render();
       }
       case "f-code": {
         await run(btn, () => D.auth.verifyCode(state.email, v("otp").replace(/\s+/g, "")));

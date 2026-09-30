@@ -5,7 +5,7 @@
 - **홈페이지**: 서비스 소개와 환자·보호자 / 작업치료사 가입을 나눠서 시작
 - **치료사**: 대시보드(오늘 일정, 확인이 필요한 환자, 다가오는 재평가·목표 기한, 환자 현황), 치료 일정 관리, 환자 등록, 목표·평가 점수 관리, AI가 만든 SOAP 초안과 실시간 기록 점검, 서명(서명 후 수정 불가), 가정 운동 처방, 환자별 위험 신호 자동 검진, 메시지
 - **환자·보호자**: 홈 대시보드(다음 치료, 오늘 운동, 연속 기록, 오늘 컨디션, 목표), 보호자 가입, 초대 코드로 가입, 휴대폰·노트북 카메라로 운동 각도·횟수 측정, 쉬운 말로 된 회복 기록, 치료사와 실시간 메시지
-- **로그인**: 비밀번호 없이 이메일로 받은 링크 또는 숫자 인증 코드
+- **가입·로그인**: 이메일과 비밀번호로 가입(이메일 인증 필수), 비밀번호 찾기, 메일 코드 로그인(기존 계정용)
 
 ## 폴더
 
@@ -20,7 +20,6 @@
 | `supabase/templates/` | 한국어 로그인 메일 (링크 + 인증 코드) |
 | `supabase/tests/rls_test.sql` | 권한 테스트 24개 (다른 치료사·환자 데이터가 안 보이는지) |
 | `tests/e2e.mjs` | 치료사·환자 두 브라우저로 전체 흐름을 확인하는 테스트 |
-| `prototype/index.html` | 설치 없이 열어 보는 데모 (가짜 데이터) |
 | `docs/ARCHITECTURE.md` | 전체 구조, AI 설계, 법규 체크리스트, 로드맵 |
 | `docs/DASHBOARD_RESEARCH.md` | 치료사·환자 대시보드에 넣은 정보와 조사 근거 |
 
@@ -71,8 +70,9 @@ npx supabase db reset && npm run test:e2e  # 전체 흐름 (앱과 Supabase가 �
    - **Site URL**: Vercel 주소 (예: `https://soapoai.vercel.app`)
    - **Redirect URLs**: `https://soapoai.vercel.app/**` 추가
 2. [Authentication → Emails](https://supabase.com/dashboard/project/ftgzlusvshpyadudqwzo/auth/templates)
-   - **Magic link**와 **Confirm signup** 두 곳 모두 제목을 `SOAPO 재활노트 로그인`으로 바꿉니다.
+   - **Magic link**와 **Confirm signup** 두 곳 모두 제목을 `SOAPO.ai 로그인·가입 인증`으로 바꿉니다.
    - 본문에는 `supabase/templates/magic_link.html` 내용을 붙여 넣습니다.
+   - **Reset password**에는 제목 `SOAPO.ai 비밀번호 재설정`, 본문 `supabase/templates/recovery.html`을 넣습니다.
    - 이 템플릿에 인증 코드가 들어 있어야 다른 기기에서 메일을 연 환자도 로그인할 수 있습니다.
 
 **방법 B: 자동 (GitHub Actions)**

@@ -41,7 +41,8 @@ async function api(method, path, body) {
 }
 
 const template = await readFile(new URL("../supabase/templates/magic_link.html", import.meta.url), "utf8");
-const subject = "SOAPO 재활노트 로그인";
+const recovery = await readFile(new URL("../supabase/templates/recovery.html", import.meta.url), "utf8");
+const subject = "SOAPO.ai 로그인·가입 인증";
 
 const auth = {
   site_url: site,
@@ -50,6 +51,10 @@ const auth = {
   mailer_templates_magic_link_content: template,
   mailer_subjects_confirmation: subject,
   mailer_templates_confirmation_content: template,
+  mailer_subjects_recovery: "SOAPO.ai 비밀번호 재설정",
+  mailer_templates_recovery_content: recovery,
+  mailer_autoconfirm: false,      // 가입 시 이메일 인증 필수
+  password_min_length: 8,
   mailer_otp_exp: 3600,
 };
 

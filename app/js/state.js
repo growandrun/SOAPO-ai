@@ -1,9 +1,10 @@
 /* 화면 상태 (한 곳에서 관리) */
 export const state = {
-  phase: "loading",        // loading | setup | landing | auth | onboard | ready | error
+  phase: "loading",        // loading | setup | landing | auth | reset | onboard | ready | error
   userId: null, email: "", error: "",
   authMode: "login",       // login | patient | therapist
-  authStep: "email",       // email | sent
+  authStep: "form",        // form | confirm | code-email | code-sent | forgot | forgot-sent
+  recovery: false,         // 비밀번호 재설정 링크로 들어옴
   role: "patient", relation: "self",
   // 치료사
   tView: "dashboard",      // dashboard | patient | new
